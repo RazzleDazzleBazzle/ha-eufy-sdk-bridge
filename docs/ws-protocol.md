@@ -163,7 +163,7 @@ from `state` (same `name`).
 ### `device.set`
 
 Write a property (maps to the SDK's `setProperty`). The valid `name`s are the writable properties a
-device's capabilities expose (e.g. `statusLed`, `nightVision`, guard-mode `mode`, …). _(Requires auth.)_
+device's capabilities expose (e.g. `statusLed`, `nightVision`, a station's `armingMode`, …). _(Requires auth.)_
 
 ```jsonc
 // →
@@ -310,10 +310,31 @@ raw video protocol.
 
 ---
 
+## Guard / station security mode (arm home/away/disarm)
+
+Not a dedicated command — it's the station device's `armingMode` property, exposed generically through
+`device.properties` / `device.set` / `device.state` like any other property. Fetch `device.properties`
+for the station's `sn` to confirm the exact `enumValues` for your account before wiring a frontend.
+
+```jsonc
+// read the station's current mode (part of device.state's flat `state` map)
+// →  { "id": 1, "cmd": "device.state", "sn": "EXAMPLE-STATION-0003" }
+// ←  { "id": 1, "ok": true, "device": { "sn": "…", "codec": "station", "state": { "armingMode": "home", … }, … } }
+// arm / disarm
+// →  { "id": 2, "cmd": "device.set", "sn": "EXAMPLE-STATION-0003", "name": "armingMode", "value": "away" }
+// ←  { "id": 2, "ok": true }
+```
+
+The station reports nine modes (`away`, `home`, `schedule`, `custom1`-`3`, `off`, `geo`, `disarmed`), but
+only `away` / `home` / `disarmed` are wire-confirmed as **settable** — enough for a HomeKit/HA-style
+arm-away/arm-home/disarm panel. Map "Night" to whichever custom schedule slot your Eufy app has
+configured as its Night period (check the app, don't assume `custom1`), since "schedule" itself isn't a
+mode you can target directly. The `armingModeChanged` event pushes changes to every client; `alarm`
+carries the siren lifecycle.
+
 ## Not yet exposed
 
 - Capability **action** verbs (PTZ move, siren test, talkback) — only property writes via `device.set`
   today.
-- Guard / station security mode (arm home/away/disarm).
 - Per-device event subscription/filtering (events broadcast to all clients).
 - Audio / recording / timelapse.

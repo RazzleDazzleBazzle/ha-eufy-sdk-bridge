@@ -81,6 +81,12 @@ export function loadConfig(env = process.env) {
     // holds a battery camera's radio open for ~28s per event. Set BRIDGE_PREWARM=1 to enable the SDK's
     // default pre-warm events.
     prewarm: truthy(env.BRIDGE_PREWARM),
+    // Declared frame rate go2rtc's ffmpeg pull uses to derive real timestamps for a camera's raw,
+    // untimed Annex-B feed (see go2rtc-config.mjs) — the P2P wire carries no fps of its own. 15 matches
+    // what real Eufy cameras were consistently measured at; override only if a specific model is
+    // confirmed to run at a different real rate (a wrong guess here shows up as visibly wrong playback
+    // speed, not a silent failure).
+    streamFps: env.BRIDGE_STREAM_FPS ? Number(env.BRIDGE_STREAM_FPS) : 15,
   };
 
   const DEBUG = truthy(env.BRIDGE_DEBUG);
