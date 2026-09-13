@@ -61,11 +61,24 @@ export async function writeGo2rtcConfig(cfg, devices) {
     "streams:",
   ];
   for (const d of cams) {
-    // A stream id per camera serial; the source is this bridge's own HTTP feed. `input=-r <fps> -i
-    // {input}` overrides go2rtc's default bare `-i {input}` so the untimed raw feed gets a declared
-    // frame rate before ffmpeg's h264 encoder (video=h264) derives real timestamps from it.
+    // A stream id per camera serial; the source is this bridge's own HTTP feed. `input=-r <fps> -i <src>`
+    // overrides go2rtc's default bare `-i {input}` so the untimed raw feed gets a declared frame rate
+    // before ffmpeg's h264 encoder (video=h264) derives real timestamps from it.
+    //
+    // Deliberately spells out `src` here rather than using go2rtc's own `{input}` placeholder (its own
+    // docs show `#input=-timeout {timeout} -i {input}` as the normal way to write this). Confirmed via
+    // go2rtc's source (internal/streams/producer.go) that this specific placeholder is special: ANY
+    // stream source containing the literal substring "{input}" makes go2rtc register it as a "template"
+    // producer whose real `url` is only ever filled in by a later SetSource() call — one that never
+    // happens for a plain top-level camera stream, so `prod.url` stays permanently empty. That empty url
+    // then satisfies `add_consumer.go`'s loop-request guard (`prod.url == consumer.GetSource()`, both
+    // empty) and every consumer gets silently skipped in milliseconds — go2rtc never even dials, so
+    // nothing reaches this bridge, and ffmpeg is never wrong because it's never run. Confirmed end to end
+    // on real hardware: the exact same transcode invoked directly (bypassing go2rtc) plays 300 clean
+    // frames with zero errors; only the `{input}`-shaped config line fails. Substituting the real URL
+    // here avoids the literal placeholder entirely, so this bug doesn't trigger.
     const src = `http://${cfg.selfHost}:${cfg.port}/stream/${d.sn}`;
-    lines.push(`  ${d.sn}: "ffmpeg:${src}#video=h264#input=-r ${fps} -i {input}"`);
+    lines.push(`  ${d.sn}: "ffmpeg:${src}#video=h264#input=-r ${fps} -i ${src}"`);
   }
   const yaml = lines.join("\n") + "\n";
   await mkdir(dirname(cfg.go2rtcConfig), { recursive: true }).catch(() => {});
