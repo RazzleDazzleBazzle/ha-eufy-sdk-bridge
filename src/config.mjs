@@ -95,6 +95,15 @@ export function loadConfig(env = process.env) {
     // into the visible log at all. Unset by default (go2rtc keeps its own built-in "info" default);
     // GO2RTC_FFMPEG_LOG alone is NOT enough to see ffmpeg's output — set this to "debug" too.
     go2rtcLogLevel: env.GO2RTC_LOG_LEVEL || undefined,
+    // How long a /stream feed is kept open after its consumer disconnects, before actually tearing it
+    // down. Exists because Home Assistant's own RTSP client hard-codes a 5s read timeout with no
+    // override hook — a camera whose P2P handshake takes longer than that (confirmed ~10-11s on real
+    // hardware) always fails HA's FIRST attempt. HA auto-retries ~10s later; keeping the P2P session
+    // warm across that gap means the retry reuses an already-flowing feed instead of paying a fresh
+    // handshake, so it succeeds well inside the 5s window on the SECOND try. 30s comfortably covers the
+    // observed ~15s worst-case gap between HA's first failure and its retry. 0 disables (restores the
+    // previous tear-down-immediately behaviour).
+    streamReconnectGraceMs: env.STREAM_RECONNECT_GRACE_MS != null ? Number(env.STREAM_RECONNECT_GRACE_MS) : 30_000,
   };
 
   const DEBUG = truthy(env.BRIDGE_DEBUG);

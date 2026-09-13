@@ -15,7 +15,56 @@ function json(res, code, body) {
 export function createHttpHandler(ctx) {
   const { cfg, eufy, SCHEMA_VERSION, eventImageDir } = ctx;
   const { flags } = ctx.state;
-  const { streaming, idleSuspended, activeStreams, lastPullAttempt, rtspLastActive } = ctx.state;
+  const { streaming, idleSuspended, activeStreams, lastPullAttempt, rtspLastActive, pendingTeardown } = ctx.state;
+
+  // Actually tear a feed down: stop the P2P pull for real and, if it had been reported as streaming,
+  // broadcast the "off" edge. Idempotent — safe to call from either lifecycle path (a consumer that
+  // never reconnected within its grace window, or the feed itself dying on its own).
+  function reallyDestroy(sn, feed) {
+    const pending = pendingTeardown.get(sn);
+    if (pending) clearTimeout(pending.timer);
+    pendingTeardown.delete(sn);
+    activeStreams.delete(sn);
+    feed.destroy();
+    if (streaming.delete(sn)) ctx.broadcast({ event: "streamState", deviceSn: sn, active: false });
+  }
+
+  // A consumer went away, but the P2P feed itself is still healthy — keep it open and drained (so the
+  // source sees no backpressure) for cfg.streamReconnectGraceMs, in case a fresh request for the same
+  // sn arrives shortly (Home Assistant's own RTSP client, in particular, hard-codes a 5s read timeout
+  // with no override hook — a camera whose P2P handshake is slower than that always fails HA's FIRST
+  // attempt, but HA auto-retries ~10s later; reusing an already-flowing feed on that retry sidesteps a
+  // second full handshake, landing well inside HA's 5s window instead of racing it again from cold).
+  function scheduleTeardown(sn, feed) {
+    activeStreams.delete(sn);
+    if (!cfg.streamReconnectGraceMs) {
+      reallyDestroy(sn, feed);
+      return;
+    }
+    const drain = () => {};
+    feed.on("data", drain);
+    const timer = setTimeout(() => {
+      const p = pendingTeardown.get(sn);
+      if (p) reallyDestroy(sn, p.feed);
+    }, cfg.streamReconnectGraceMs);
+    pendingTeardown.set(sn, { feed, drain, timer });
+    ctx.eventLog(
+      `/stream ${sn} → consumer gone, keeping P2P warm ${cfg.streamReconnectGraceMs}ms for a possible reconnect`,
+    );
+  }
+
+  // Wire one feed (freshly opened, or reused from pendingTeardown) to the current request/response.
+  // The feed's own error/close → reallyDestroy listeners are attached once, at open time, by the
+  // caller — not here — since re-attaching them on every reconnect would leak a listener per cycle.
+  function attachConsumer(sn, feed, req, res) {
+    if (!streaming.has(sn)) ctx.broadcast({ event: "streamState", deviceSn: sn, active: true });
+    streaming.add(sn);
+    activeStreams.set(sn, { feed, startedAt: Date.now() });
+    rtspLastActive.set(sn, Date.now()); // a live stream counts as activity for the rtspStream auto-off
+    res.writeHead(200, { "content-type": "video/H264", "cache-control": "no-cache" });
+    feed.pipe(res);
+    req.on("close", () => scheduleTeardown(sn, feed));
+  }
 
   return async function handleHttp(req, res) {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -101,6 +150,21 @@ export function createHttpHandler(ctx) {
 
     if (kind === "stream" && sn) {
       if (cfg.streamIdleMs) lastPullAttempt.set(sn, Date.now()); // consumer is asking (watched vs. gone)
+
+      // A feed kept warm from a just-departed consumer — reuse it outright, skipping straight past the
+      // idle-suspend check and a fresh P2P handshake entirely. This is the whole point of the grace
+      // period: a quick reconnect (e.g. Home Assistant's own RTSP client retrying ~10s after its
+      // hard-coded 5s read timeout) gets data immediately instead of racing that same handshake again.
+      const pending = pendingTeardown.get(sn);
+      if (pending) {
+        clearTimeout(pending.timer);
+        pendingTeardown.delete(sn);
+        pending.feed.removeListener("data", pending.drain);
+        ctx.eventLog(`/stream ${sn} → reconnect reused warm P2P feed`);
+        attachConsumer(sn, pending.feed, req, res);
+        return;
+      }
+
       // Idle-suspended: no detection recently, so don't reopen the P2P session. go2rtc's ffmpeg source
       // retries into this until a detection or the consumer giving up lifts it (see streamIdleTick).
       if (cfg.streamIdleMs && idleSuspended.has(sn))
@@ -119,21 +183,12 @@ export function createHttpHandler(ctx) {
         if (!cam?.openReadable) return json(res, 404, { error: "no live video on this device" });
         const feed = await cam.openReadable(); // node Readable of Annex-B
         ctx.eventLog(`/stream ${sn} → P2P feed open (${Date.now() - t0}ms)`);
-        if (!streaming.has(sn)) ctx.broadcast({ event: "streamState", deviceSn: sn, active: true });
-        streaming.add(sn);
-        activeStreams.set(sn, { feed, startedAt: Date.now() });
-        rtspLastActive.set(sn, Date.now()); // a live stream counts as activity for the rtspStream auto-off
-        res.writeHead(200, { "content-type": "video/H264", "cache-control": "no-cache" });
-        feed.pipe(res);
-        // streaming.delete returns true only on the first cleanup for this feed → broadcast "off" once.
-        const cleanup = () => {
-          feed.destroy();
-          if (streaming.delete(sn)) ctx.broadcast({ event: "streamState", deviceSn: sn, active: false });
-          activeStreams.delete(sn);
-        };
-        req.on("close", cleanup);
-        feed.on("error", cleanup);
-        feed.on("close", cleanup);
+        // The feed's own lifecycle → real teardown, attached once for as long as this feed object
+        // lives (a reconnect within the grace period reuses the SAME feed, so this must not be
+        // re-attached each time — see attachConsumer's own comment).
+        feed.on("error", () => reallyDestroy(sn, feed));
+        feed.on("close", () => reallyDestroy(sn, feed));
+        attachConsumer(sn, feed, req, res);
         return;
       } catch (e) {
         ctx.eventLog(`/stream ${sn} → 502 FAILED (${Date.now() - t0}ms): ${e?.message ?? e}`);

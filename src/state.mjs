@@ -35,5 +35,10 @@ export function createState() {
     idleSuspended: new Set(), // sns torn down for idleness; reopen blocked until motion or consumer-gone
     lastPullAttempt: new Map(), // sn -> ms go2rtc last asked for /stream (even while suspended)
     rtspLastActive: new Map(), // sn -> ms of last detection/stream, for the battery rtspStream auto-off
+
+    // sn -> { feed, drain, timer } — a feed kept briefly open after its consumer disconnected, so a
+    // quick reconnect (e.g. a consumer that gives up and retries a few seconds later) reuses the
+    // already-open P2P session instead of paying a fresh handshake. See http-routes.mjs.
+    pendingTeardown: new Map(),
   };
 }
