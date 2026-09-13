@@ -87,6 +87,9 @@ export function loadConfig(env = process.env) {
     // confirmed to run at a different real rate (a wrong guess here shows up as visibly wrong playback
     // speed, not a silent failure).
     streamFps: env.BRIDGE_STREAM_FPS ? Number(env.BRIDGE_STREAM_FPS) : 15,
+    // go2rtc's own ffmpeg-subprocess log level (see go2rtc-config.mjs) — "error" (go2rtc's own default)
+    // is normal-operation quiet; set GO2RTC_FFMPEG_LOG=debug to diagnose a stream that won't play.
+    go2rtcFfmpegLog: env.GO2RTC_FFMPEG_LOG || "error",
   };
 
   const DEBUG = truthy(env.BRIDGE_DEBUG);

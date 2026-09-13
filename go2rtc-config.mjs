@@ -42,6 +42,13 @@ export async function writeGo2rtcConfig(cfg, devices) {
     '  listen: ":8554"',
     "webrtc:",
     '  listen: ":8555"',
+    // go2rtc's ffmpeg module defaults its OWN subprocess to `-v error`, which swallows exactly the
+    // warnings (e.g. "Timestamps are unset in a packet") that would explain a stream failing on real
+    // camera footage the way it didn't on the synthetic feed this was verified against locally. Set
+    // GO2RTC_FFMPEG_LOG=debug (redeploy required — this file is regenerated fresh at every boot) to see
+    // it; default matches go2rtc's own quiet default so normal operation isn't noisier than before.
+    "log:",
+    `  ffmpeg: ${cfg.go2rtcFfmpegLog || "error"}`,
     "streams:",
   ];
   for (const d of cams) {
