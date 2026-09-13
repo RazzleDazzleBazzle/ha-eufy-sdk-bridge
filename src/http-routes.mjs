@@ -107,11 +107,18 @@ export function createHttpHandler(ctx) {
         return json(res, 503, {
           error: "stream idle-suspended — no recent detection, waiting for motion or a fresh viewer",
         });
+      // Narrow, always-on trace of each stage — a stalled P2P handshake or session hydration otherwise
+      // hangs the request with NOTHING in the logs to say where, since none of this awaited (matching a
+      // real "curl got 0 bytes, nothing printed" report against real hardware).
+      const t0 = Date.now();
+      ctx.eventLog(`/stream ${sn} → request received`);
       try {
         const client = await streamClientFor(sn, cfg); // its OWN P2P session — see streams.mjs
+        ctx.eventLog(`/stream ${sn} → stream client ready (${Date.now() - t0}ms)`);
         const cam = (await client.getDevice(sn)).camera?.();
         if (!cam?.openReadable) return json(res, 404, { error: "no live video on this device" });
         const feed = await cam.openReadable(); // node Readable of Annex-B
+        ctx.eventLog(`/stream ${sn} → P2P feed open (${Date.now() - t0}ms)`);
         if (!streaming.has(sn)) ctx.broadcast({ event: "streamState", deviceSn: sn, active: true });
         streaming.add(sn);
         activeStreams.set(sn, { feed, startedAt: Date.now() });
@@ -129,6 +136,7 @@ export function createHttpHandler(ctx) {
         feed.on("close", cleanup);
         return;
       } catch (e) {
+        ctx.eventLog(`/stream ${sn} → 502 FAILED (${Date.now() - t0}ms): ${e?.message ?? e}`);
         return json(res, 502, { error: String(e?.message ?? e) });
       }
     }
