@@ -5,11 +5,16 @@
 #          linux/amd64 + linux/arm64 (node:24-alpine has no arm/v7 base).
 #
 # The SDK is a PUBLIC npm package (pulled by `npm ci` in the build), so no SDK checkout / build context.
-# Uses the docker CLI in shell rather than the docker/* marketplace actions, because the org's Actions
-# policy allows only actions owned by mega-yfue or created by GitHub — so `actions/checkout` is fine,
-# but `docker/build-push-action` etc. are not. buildx is preinstalled on the runner; arm64 emulation
-# comes from a `tonistiigi/binfmt` image pull (an image, not an action). Push uses the built-in
-# GITHUB_TOKEN via `packages: write`.
+# Uses the docker CLI in shell rather than the docker/* marketplace actions — inherited from the
+# upstream mega-yfue org's Actions policy (only actions owned by mega-yfue or created by GitHub), which
+# doesn't apply to this personal fork, but the docker-CLI approach works fine regardless and there was
+# no reason to switch it back. buildx is preinstalled on the runner; arm64 emulation comes from a
+# `tonistiigi/binfmt` image pull (an image, not an action). Push uses the built-in GITHUB_TOKEN via
+# `packages: write`.
+#
+# First publish only: GHCR defaults a token-published package to PRIVATE regardless of repo visibility —
+# after the first run, go to the package's own Settings on GitHub and set visibility to Public, or an
+# anonymous `docker pull` (no `docker login`) will get a bare "denied" with no hint why.
 name: Publish image to GHCR
 
 on:
@@ -26,7 +31,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE: ghcr.io/mega-yfue/ha-eufy-sdk-bridge
+  IMAGE: ghcr.io/razzledazzlebazzle/ha-eufy-sdk-bridge
 
 jobs:
   publish:

@@ -4,7 +4,7 @@ The bridge is one container that logs into eufy **once** and exposes the SDK ove
 video) for the [`ha-eufy-sdk`](https://github.com/mega-yfue/ha-eufy-sdk) Home Assistant integration.
 The published image already bundles the SDK and go2rtc, so you don't build anything — you pull and run.
 
-- **Image:** `ghcr.io/mega-yfue/ha-eufy-sdk-bridge:latest` (multi-arch: `amd64` · `arm64`)
+- **Image:** `ghcr.io/razzledazzlebazzle/ha-eufy-sdk-bridge:latest` (multi-arch: `amd64` · `arm64`)
 - **Ports:** `3000` WS/HTTP control · `1984` go2rtc API/WebRTC · `8554` RTSP · `8555` WebRTC (TCP/UDP)
 
 > **One session per account.** eufy allows a single active login per account, so run **exactly one**
@@ -22,7 +22,7 @@ services:
   # ... your existing homeassistant service ...
 
   eufy-bridge:
-    image: ghcr.io/mega-yfue/ha-eufy-sdk-bridge:latest
+    image: ghcr.io/razzledazzlebazzle/ha-eufy-sdk-bridge:latest
     container_name: eufy-bridge
     restart: unless-stopped
     network_mode: host # needed for go2rtc WebRTC (UDP/ICE)
@@ -55,7 +55,7 @@ server's LAN IP) and the port you set.
 ```yaml
 services:
   eufy-bridge:
-    image: ghcr.io/mega-yfue/ha-eufy-sdk-bridge:latest
+    image: ghcr.io/razzledazzlebazzle/ha-eufy-sdk-bridge:latest
     container_name: eufy-bridge
     restart: unless-stopped
     network_mode: host
@@ -133,7 +133,7 @@ See [`ws-protocol.md`](./ws-protocol.md) for the full WebSocket protocol.
 
 ## Notes
 
-- **Architecture:** the published `ghcr.io/mega-yfue/ha-eufy-sdk-bridge` image is a multi-arch manifest
+- **Architecture:** the published `ghcr.io/razzledazzlebazzle/ha-eufy-sdk-bridge` image is a multi-arch manifest
   (`linux/amd64`, `linux/arm64` — 64-bit ARM like Raspberry Pi / HA OS as well as x86; `node:24-alpine`
   has no 32-bit `arm/v7` base). Republish it with `scripts/publish-multiarch.sh` (see the README).
 - **Not host networking?** WebRTC needs UDP/ICE, which is awkward behind bridge networking. If you drop

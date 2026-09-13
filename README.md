@@ -28,7 +28,7 @@ Pull the published image and run it (bundles the SDK + go2rtc):
 docker run -d --name eufy-bridge --network host \
   -e EUFY_EMAIL='you@example.com' -e EUFY_PASSWORD='…' -e EUFY_COUNTRY='GB' \
   -v /opt/eufy-bridge-data:/app/data \
-  ghcr.io/mega-yfue/ha-eufy-sdk-bridge:latest
+  ghcr.io/razzledazzlebazzle/ha-eufy-sdk-bridge:latest
 ```
 
 or with Compose (`cp .env.example .env` first): `docker compose up -d`.
@@ -46,7 +46,7 @@ or with Compose (`cp .env.example .env` first): `docker compose up -d`.
 | [`ha-eufy-sdk`](https://github.com/mega-yfue/ha-eufy-sdk)             | the HACS integration (front door)             |
 
 > Status: working — WS control + auth-over-WS (2FA/captcha), device listing, snapshots, and go2rtc
-> streaming. Published image: `ghcr.io/mega-yfue/ha-eufy-sdk-bridge` (multi-arch: `amd64` · `arm64`).
+> streaming. Published image: `ghcr.io/razzledazzlebazzle/ha-eufy-sdk-bridge` (multi-arch: `amd64` · `arm64`).
 > **Publishing a GitHub Release** builds and pushes the versioned + `:latest` tags
 > automatically ([`.github/workflows/publish-ghcr.yml`](./.github/workflows/publish-ghcr.yml)); the same
 > build runs locally via [`scripts/publish-multiarch.sh`](./scripts/publish-multiarch.sh). A merge to the
