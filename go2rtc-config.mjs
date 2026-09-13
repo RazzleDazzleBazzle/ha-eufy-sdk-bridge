@@ -44,11 +44,20 @@ export async function writeGo2rtcConfig(cfg, devices) {
     '  listen: ":8555"',
     // go2rtc's ffmpeg module defaults its OWN subprocess to `-v error`, which swallows exactly the
     // warnings (e.g. "Timestamps are unset in a packet") that would explain a stream failing on real
-    // camera footage the way it didn't on the synthetic feed this was verified against locally. Set
-    // GO2RTC_FFMPEG_LOG=debug (redeploy required — this file is regenerated fresh at every boot) to see
-    // it; default matches go2rtc's own quiet default so normal operation isn't noisier than before.
+    // camera footage the way it didn't on the synthetic feed this was verified against locally.
+    //
+    // Raising ONLY `ffmpeg` here is not enough to actually SEE that output, though — confirmed by
+    // reading go2rtc's own source: the process that spawns ffmpeg and decides whether to forward its
+    // stderr into go2rtc's visible logs at all is a SEPARATE internal module ("exec"), whose own level
+    // this never touched, so ffmpeg could be producing detail that go2rtc was silently discarding.
+    // `level` (unset unless GO2RTC_LOG_LEVEL is given, so normal operation keeps go2rtc's own built-in
+    // default rather than us silently overriding it) is the global fallback every module without its
+    // own override uses, "exec" included — so both need to move together to see anything at all. Set
+    // BOTH GO2RTC_FFMPEG_LOG=debug and GO2RTC_LOG_LEVEL=debug (redeploy required — this file is
+    // regenerated fresh at every boot) to diagnose a stream that won't play.
     "log:",
     `  ffmpeg: ${cfg.go2rtcFfmpegLog || "error"}`,
+    ...(cfg.go2rtcLogLevel ? [`  level: ${cfg.go2rtcLogLevel}`] : []),
     "streams:",
   ];
   for (const d of cams) {

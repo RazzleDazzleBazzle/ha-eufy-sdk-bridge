@@ -90,6 +90,11 @@ export function loadConfig(env = process.env) {
     // go2rtc's own ffmpeg-subprocess log level (see go2rtc-config.mjs) — "error" (go2rtc's own default)
     // is normal-operation quiet; set GO2RTC_FFMPEG_LOG=debug to diagnose a stream that won't play.
     go2rtcFfmpegLog: env.GO2RTC_FFMPEG_LOG || "error",
+    // go2rtc's GLOBAL log level — the fallback every internal module without its own override uses,
+    // including the "exec" module that actually spawns ffmpeg and decides whether to forward its stderr
+    // into the visible log at all. Unset by default (go2rtc keeps its own built-in "info" default);
+    // GO2RTC_FFMPEG_LOG alone is NOT enough to see ffmpeg's output — set this to "debug" too.
+    go2rtcLogLevel: env.GO2RTC_LOG_LEVEL || undefined,
   };
 
   const DEBUG = truthy(env.BRIDGE_DEBUG);
