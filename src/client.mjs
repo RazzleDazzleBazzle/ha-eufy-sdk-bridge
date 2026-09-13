@@ -15,6 +15,11 @@ export function createEufy({ cfg, DEBUG_P2P }) {
     // radio isn't held open ~28s per doorbell/person/pet/package event. BRIDGE_PREWARM=1 → undefined,
     // which lets the SDK use its default high-intent pre-warm events.
     prewarmEvents: cfg.prewarm ? undefined : [],
-    logger: DEBUG_P2P ? new ConsoleLogger("info") : undefined,
+    // "debug", not "info": the SDK's own per-phase P2P handshake trace (sendLookups/beginCheckCam/
+    // onConnected/live-start-ack, everything a slow-connect report needs) is logged at .debug() level
+    // (confirmed in the SDK's own core/logger.ts: debug=0 < info=1 in ConsoleLogger's rank order) — so
+    // "info" was silently swallowing all of it the whole time this flag has existed. Real transport
+    // traffic only, still gated behind BRIDGE_DEBUG_P2P — quiet by default either way.
+    logger: DEBUG_P2P ? new ConsoleLogger("debug") : undefined,
   });
 }
