@@ -16,7 +16,7 @@ WORKDIR /app
 # go2rtc — pin the version so an image rebuild cannot change media behaviour. Select the binary by
 # TARGETARCH (Docker BuildKit sets it) so the image builds on arm64 (Raspberry Pi / HA OS) too, not
 # just amd64 — the bug the first bridge had.
-ARG GO2RTC_VERSION=1.9.9
+ARG GO2RTC_VERSION=1.9.14
 ARG TARGETARCH
 RUN case "${TARGETARCH:-amd64}" in \
       amd64) g2="go2rtc_linux_amd64" ;; \
