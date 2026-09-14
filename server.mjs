@@ -24,7 +24,7 @@ import { createAuth } from "./src/auth.mjs";
 import { createBoot } from "./src/boot.mjs";
 import { createHttpHandler } from "./src/http-routes.mjs";
 import { createWsServer } from "./src/ws-server.mjs";
-import { closeStreamClients } from "./streams.mjs";
+import { streamClientFor, closeStreamClients } from "./streams.mjs";
 
 const config = loadConfig();
 const { cfg, DEBUG, DEBUG_P2P, EVENT_LOG, eventImageDir } = config;
@@ -44,7 +44,7 @@ if (!cfg.email || !cfg.password) {
 // ── assemble ctx ────────────────────────────────────────────────────────────────────────────────────
 const state = createState();
 const eufy = createEufy(config);
-const ctx = { ...config, eufy, state };
+const ctx = { ...config, eufy, state, streamClientFor };
 
 // Each factory reads its cross-module deps off ctx lazily, so this single merge is enough — nothing here
 // is called until login/handlers run, by which point ctx is complete.

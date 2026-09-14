@@ -31,14 +31,22 @@ export function createState() {
 
     // ── live-stream idle auto-off bookkeeping ──
     lastDetect: new Map(), // sn -> ms of the most recent detection
-    activeStreams: new Map(), // sn -> { feed, startedAt } for feeds currently piping
+    // sn -> { feed, startedAt, consumers: Set<ServerResponse> } for feeds currently piping — consumers
+    // holds every simultaneously-attached HTTP response sharing this ONE P2P feed (e.g. go2rtc's own
+    // pull for the dashboard alongside a second, independent puller), not just the first/only one.
+    activeStreams: new Map(),
     idleSuspended: new Set(), // sns torn down for idleness; reopen blocked until motion or consumer-gone
     lastPullAttempt: new Map(), // sn -> ms go2rtc last asked for /stream (even while suspended)
     rtspLastActive: new Map(), // sn -> ms of last detection/stream, for the battery rtspStream auto-off
 
-    // sn -> { feed, drain, timer } — a feed kept briefly open after its consumer disconnected, so a
+    // sn -> { feed, drain, timer } — a feed kept briefly open after its LAST consumer disconnected, so a
     // quick reconnect (e.g. a consumer that gives up and retries a few seconds later) reuses the
     // already-open P2P session instead of paying a fresh handshake. See http-routes.mjs.
     pendingTeardown: new Map(),
+
+    // sn -> Promise<feed> for a P2P open currently in flight, so a second /stream request arriving
+    // while the first is still opening awaits the SAME open instead of racing a competing P2P session
+    // for the same camera. See http-routes.mjs's openFeedFor.
+    pendingOpens: new Map(),
   };
 }
