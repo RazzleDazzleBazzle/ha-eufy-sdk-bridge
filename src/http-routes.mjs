@@ -161,6 +161,22 @@ export function createHttpHandler(ctx) {
         res.writeHead(200, { "content-type": "image/jpeg", "content-length": cached.jpeg.length });
         return res.end(cached.jpeg);
       }
+      // This device must never pay for a live pull — not on the periodic sweep, and not here either.
+      // Only ever serve what's already sitting around: Eufy's own retained picture, or (last resort)
+      // this bridge's own persisted "Last event" cover. Independent of the cache above, which a no-live
+      // device can still land in via the sweep's free piggyback (see snapshot-warmup.mjs). Best-effort
+      // throughout — every step is a soft fallback to the next, ending in 404 rather than a hard error.
+      if (cfg.snapshotNoLiveDevices?.has(sn)) {
+        const cam = (await eufy.getDevice(sn).catch(() => undefined))?.camera?.();
+        if (!cam) return json(res, 404, { error: "no camera on this device" });
+        let jpeg = await cam.snapshotStored?.().catch(() => undefined);
+        if (!jpeg) {
+          jpeg = await fs.promises.readFile(path.join(eventImageDir, `last-event-${sn}.jpg`)).catch(() => undefined);
+        }
+        if (!jpeg) return json(res, 404, { error: "no image available" });
+        res.writeHead(200, { "content-type": "image/jpeg", "content-length": jpeg.length });
+        return res.end(jpeg);
+      }
       try {
         const cam = (await eufy.getDevice(sn)).camera?.();
         if (!cam) return json(res, 404, { error: "no camera on this device" });

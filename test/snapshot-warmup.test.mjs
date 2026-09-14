@@ -85,6 +85,29 @@ test("skips a camera someone is actively streaming right now", async () => {
   assert.equal(state.snapshotCache.has("CAM1"), false);
 });
 
+test("never live-pulls a SNAPSHOT_NO_LIVE_DEVICES camera, even on its scheduled turn", async () => {
+  const { ctx, state, liveCalls } = await buildCtx({
+    overrides: { SNAPSHOT_WARM_INTERVAL_MIN: "30", SNAPSHOT_NO_LIVE_DEVICES: "CAM1" },
+  });
+  await ctx.snapshotWarmupTick();
+  assert.deepEqual(liveCalls, ["CAM2"], "CAM1 skipped entirely — no live pull, only CAM2's normal one");
+  assert.equal(state.snapshotCache.has("CAM1"), false, "nothing to adopt, so the no-live camera's cache stays empty");
+});
+
+test("a no-live camera still gets the free piggyback from a fresher last-event image", async (t) => {
+  const { ctx, state, liveCalls, tmpDir } = await buildCtx({
+    devices: [CAM1],
+    overrides: { SNAPSHOT_WARM_INTERVAL_MIN: "30", SNAPSHOT_NO_LIVE_DEVICES: "CAM1" },
+  });
+  await fs.writeFile(path.join(tmpDir, "last-event-CAM1.jpg"), jpeg("event"));
+  t.after(() => fs.rm(tmpDir, { recursive: true, force: true }));
+
+  await ctx.snapshotWarmupTick();
+
+  assert.equal(liveCalls.length, 0);
+  assert.deepEqual(state.snapshotCache.get("CAM1").jpeg, jpeg("event"));
+});
+
 test("adopts a fresher last-event image instead of paying for a live pull", async (t) => {
   const { ctx, state, liveCalls, tmpDir } = await buildCtx({
     devices: [CAM1],

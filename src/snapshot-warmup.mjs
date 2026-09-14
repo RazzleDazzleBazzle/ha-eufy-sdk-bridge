@@ -44,6 +44,9 @@ export function createSnapshotWarmup(ctx) {
   /** Refresh one camera's cached snapshot — piggyback first, a live P2P pull only if that didn't land. */
   async function warmOne(sn) {
     if (await adoptEventImageIfFresher(sn)) return;
+    // This device must never pay for a live pull, full stop — the piggyback above is the only source
+    // its cache ever gets from this sweep. See snapshotNoLiveDevices in config.mjs.
+    if (cfg.snapshotNoLiveDevices?.has(sn)) return;
     // Someone's actively watching this camera right now (our own /stream) — a warm-up pull would
     // contend for the same station's P2P slot for no reason; the live viewer already keeps things fresh.
     if (activeStreams.has(sn)) return;

@@ -2,6 +2,9 @@
 // src/snapshot-warmup.mjs), falling back to today's on-demand live-then-stored pull when it isn't —
 // so a bridge with the feature off (the default) behaves exactly as before.
 import { PassThrough } from "node:stream";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -9,11 +12,12 @@ import { loadConfig } from "../src/config.mjs";
 import { createState } from "../src/state.mjs";
 import { createHttpHandler } from "../src/http-routes.mjs";
 
-function buildCtx({ snapshotLive, snapshotStored } = {}) {
-  const config = loadConfig({ EUFY_EMAIL: "x@y.z", EUFY_PASSWORD: "pw" });
+function buildCtx({ snapshotLive, snapshotStored, overrides = {}, eventImageDir = "/nonexistent" } = {}) {
+  const config = loadConfig({ EUFY_EMAIL: "x@y.z", EUFY_PASSWORD: "pw", ...overrides });
   const state = createState();
   const ctx = {
     ...config,
+    eventImageDir,
     eufy: {
       getDevice: async () => ({
         camera: () => ({
@@ -75,4 +79,58 @@ test("falls back to the stored snapshot when a live pull fails and nothing is ca
   const { status, body } = await get(createHttpHandler(ctx), "CAM1");
   assert.equal(status, 200);
   assert.deepEqual(body(), Buffer.from("stored"));
+});
+
+test("a SNAPSHOT_NO_LIVE_DEVICES camera never calls snapshotLive, even when it would succeed", async () => {
+  const { ctx } = buildCtx({
+    snapshotLive: async () => {
+      throw new Error("must never be called for a no-live device");
+    },
+    snapshotStored: async () => Buffer.from("stored"),
+    overrides: { SNAPSHOT_NO_LIVE_DEVICES: "CAM1" },
+  });
+  const { status, body } = await get(createHttpHandler(ctx), "CAM1");
+  assert.equal(status, 200);
+  assert.deepEqual(body(), Buffer.from("stored"));
+});
+
+test("a no-live camera still uses the warm-up cache when the sweep already populated it", async () => {
+  const { ctx, state } = buildCtx({
+    snapshotStored: async () => {
+      throw new Error("must not be reached — the cache should already have served this");
+    },
+    overrides: { SNAPSHOT_NO_LIVE_DEVICES: "CAM1" },
+  });
+  state.snapshotCache.set("CAM1", { jpeg: Buffer.from("cached"), capturedAt: Date.now() });
+  const { status, body } = await get(createHttpHandler(ctx), "CAM1");
+  assert.equal(status, 200);
+  assert.deepEqual(body(), Buffer.from("cached"));
+});
+
+test("a no-live camera falls back to the persisted Last-event file when nothing else is available", async (t) => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "http-snapshot-"));
+  t.after(() => fs.rm(tmpDir, { recursive: true, force: true }));
+  await fs.writeFile(path.join(tmpDir, "last-event-CAM1.jpg"), Buffer.from("last-event"));
+
+  const { ctx } = buildCtx({
+    snapshotStored: async () => {
+      throw new Error("nothing retained");
+    },
+    overrides: { SNAPSHOT_NO_LIVE_DEVICES: "CAM1" },
+    eventImageDir: tmpDir,
+  });
+  const { status, body } = await get(createHttpHandler(ctx), "CAM1");
+  assert.equal(status, 200);
+  assert.deepEqual(body(), Buffer.from("last-event"));
+});
+
+test("a no-live camera 404s (not 502) when truly nothing is available anywhere", async () => {
+  const { ctx } = buildCtx({
+    snapshotStored: async () => {
+      throw new Error("nothing retained");
+    },
+    overrides: { SNAPSHOT_NO_LIVE_DEVICES: "CAM1" },
+  });
+  const { status } = await get(createHttpHandler(ctx), "CAM1");
+  assert.equal(status, 404);
 });

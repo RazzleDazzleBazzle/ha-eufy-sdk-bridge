@@ -6,6 +6,17 @@ export const SCHEMA_VERSION = 1; // bump on any breaking protocol change so an o
 
 const truthy = (v) => /^(1|true|yes|on)$/i.test(String(v ?? ""));
 
+/** Comma-separated device serials → a Set, or undefined when unset (meaning "no restriction"). */
+const snList = (v) =>
+  v
+    ? new Set(
+        v
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+      )
+    : undefined;
+
 /** The SDK event names broadcast to every connected WS client. */
 export const FORWARDED_EVENTS = [
   "motion",
@@ -114,13 +125,13 @@ export function loadConfig(env = process.env) {
     // equivalent loop. Default 5s.
     snapshotWarmStaggerMs: env.SNAPSHOT_WARM_STAGGER_MS != null ? Number(env.SNAPSHOT_WARM_STAGGER_MS) : 5000,
     // Optional allowlist (comma-separated serials) — unset warms every camera the bridge knows about.
-    snapshotWarmDevices: env.SNAPSHOT_WARM_DEVICES
-      ? new Set(
-          env.SNAPSHOT_WARM_DEVICES.split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-        )
-      : undefined,
+    snapshotWarmDevices: snList(env.SNAPSHOT_WARM_DEVICES),
+    // Devices that must NEVER pay for a live P2P pull for a snapshot, full stop — not on the periodic
+    // sweep above, and not as this camera's own /snapshot fallback either. `/snapshot` for one of these
+    // only ever serves whatever's already sitting around: the warm-up cache, Eufy's own retained
+    // picture, or (last resort) this bridge's own persisted "Last event" cover — never a fresh capture.
+    // Independent of snapshotWarmDevices: works whether or not the periodic sweep is even enabled.
+    snapshotNoLiveDevices: snList(env.SNAPSHOT_NO_LIVE_DEVICES),
   };
 
   const DEBUG = truthy(env.BRIDGE_DEBUG);
