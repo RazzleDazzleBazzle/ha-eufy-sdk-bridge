@@ -70,13 +70,18 @@ export function createBoot(ctx) {
       timers.watchdog ??= setInterval(() => void ctx.watchdogTick(), 2 * 60_000);
       if (cfg.streamIdleMs) timers.streamIdle ??= setInterval(() => ctx.streamIdleTick(), 30_000);
       if (cfg.rtspIdleOffMs) timers.rtspIdle ??= setInterval(() => void ctx.rtspIdleSweep(), 60_000);
+      if (cfg.snapshotWarmMs)
+        timers.snapshotWarm ??= setInterval(() => void ctx.snapshotWarmupTick(), cfg.snapshotWarmMs);
       console.log(`[bridge] ready — ${summaries.length} devices, ${cams.length} camera stream(s)`);
       ctx.broadcast({ event: "ready", schemaVersion: SCHEMA_VERSION });
-      // Both read the P2P DB via a shared `dbChunk` stream — run sequentially so their accumulators don't
-      // cross-contaminate. Non-blocking so `ready` isn't held up.
+      // The first two read the P2P DB via a shared `dbChunk` stream — run sequentially so their
+      // accumulators don't cross-contaminate. The snapshot sweep uses a different P2P resource (a live
+      // media start, not a DB query) but still runs after them rather than piling everything onto the
+      // session at once right at boot. Non-blocking so `ready` isn't held up.
       void (async () => {
         await ctx.warmFaceRoster(); // resolve person_id -> name for face-recognition events
         await ctx.warmLastEventImages(); // populate "Last event" from local HomeBase storage on first load
+        await ctx.snapshotWarmupTick?.(); // populate the /snapshot cache instead of waiting a full interval
       })();
     } finally {
       flags.booting = false;

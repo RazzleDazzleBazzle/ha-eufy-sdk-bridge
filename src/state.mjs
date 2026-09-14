@@ -21,7 +21,7 @@ export function createState() {
       go2rtcProc: undefined,
     },
     // Interval handles, armed once at boot and cleared on shutdown.
-    timers: { watchdog: null, streamIdle: null, rtspIdle: null },
+    timers: { watchdog: null, streamIdle: null, rtspIdle: null, snapshotWarm: null },
 
     clients: new Set(), // connected WS clients (broadcast targets)
     streaming: new Set(), // sns with a live P2P feed piping right now
@@ -48,5 +48,11 @@ export function createState() {
     // while the first is still opening awaits the SAME open instead of racing a competing P2P session
     // for the same camera. See http-routes.mjs's openFeedFor.
     pendingOpens: new Map(),
+
+    // sn -> { jpeg, capturedAt } — the periodic snapshot warm-up's own cache for /snapshot/<sn>, kept
+    // fresh on its own schedule instead of every request paying for a live P2P pull. See
+    // snapshot-warmup.mjs. Empty (feature off, or not yet run once) falls back to today's on-demand
+    // live-then-stored behaviour.
+    snapshotCache: new Map(),
   };
 }

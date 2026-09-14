@@ -17,8 +17,16 @@ class NoLiveVideoError extends Error {}
 export function createHttpHandler(ctx) {
   const { cfg, eufy, SCHEMA_VERSION, eventImageDir, streamClientFor } = ctx;
   const { flags } = ctx.state;
-  const { streaming, idleSuspended, activeStreams, lastPullAttempt, rtspLastActive, pendingTeardown, pendingOpens } =
-    ctx.state;
+  const {
+    streaming,
+    idleSuspended,
+    activeStreams,
+    lastPullAttempt,
+    rtspLastActive,
+    pendingTeardown,
+    pendingOpens,
+    snapshotCache,
+  } = ctx.state;
 
   // Actually tear a feed down: stop the P2P pull for real and, if it had been reported as streaming,
   // broadcast the "off" edge. Idempotent — safe to call from either lifecycle path (a consumer that
@@ -145,6 +153,14 @@ export function createHttpHandler(ctx) {
 
     // A current still: a fresh live burst, falling back to the retained push thumbnail.
     if (kind === "snapshot" && sn) {
+      // Warmed by snapshot-warmup.mjs's own schedule (when SNAPSHOT_WARM_INTERVAL_MIN is set) — serve it
+      // instantly instead of paying for a live P2P pull on every request. Empty until that feature is
+      // enabled AND has run at least once, so this never changes behaviour for anyone not opting in.
+      const cached = snapshotCache.get(sn);
+      if (cached) {
+        res.writeHead(200, { "content-type": "image/jpeg", "content-length": cached.jpeg.length });
+        return res.end(cached.jpeg);
+      }
       try {
         const cam = (await eufy.getDevice(sn)).camera?.();
         if (!cam) return json(res, 404, { error: "no camera on this device" });

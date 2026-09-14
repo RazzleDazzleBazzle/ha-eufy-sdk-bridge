@@ -104,6 +104,23 @@ export function loadConfig(env = process.env) {
     // observed ~15s worst-case gap between HA's first failure and its retry. 0 disables (restores the
     // previous tear-down-immediately behaviour).
     streamReconnectGraceMs: env.STREAM_RECONNECT_GRACE_MS != null ? Number(env.STREAM_RECONNECT_GRACE_MS) : 30_000,
+    // Periodic snapshot warm-up for /snapshot/<sn> (see snapshot-warmup.mjs) — how often the FULL
+    // staggered sweep across every camera re-runs. Minutes, not ms: a human picks this as "every 30
+    // minutes", not a raw millisecond count. 0/unset disables the feature entirely — /snapshot keeps
+    // today's behaviour (a live P2P pull on every request, no caching).
+    snapshotWarmMs: env.SNAPSHOT_WARM_INTERVAL_MIN ? Number(env.SNAPSHOT_WARM_INTERVAL_MIN) * 60_000 : 0,
+    // Gap between each camera's turn within one sweep, so it doesn't hit every station's shared P2P
+    // slot at once — the same reason the old eufy_security_guard integration staggered its own
+    // equivalent loop. Default 5s.
+    snapshotWarmStaggerMs: env.SNAPSHOT_WARM_STAGGER_MS != null ? Number(env.SNAPSHOT_WARM_STAGGER_MS) : 5000,
+    // Optional allowlist (comma-separated serials) — unset warms every camera the bridge knows about.
+    snapshotWarmDevices: env.SNAPSHOT_WARM_DEVICES
+      ? new Set(
+          env.SNAPSHOT_WARM_DEVICES.split(",")
+            .map((s) => s.trim())
+            .filter(Boolean),
+        )
+      : undefined,
   };
 
   const DEBUG = truthy(env.BRIDGE_DEBUG);

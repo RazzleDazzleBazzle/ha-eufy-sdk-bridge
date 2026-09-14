@@ -1,0 +1,78 @@
+// /snapshot/<sn>: serves the periodic warm-up cache instantly when populated (see
+// src/snapshot-warmup.mjs), falling back to today's on-demand live-then-stored pull when it isn't —
+// so a bridge with the feature off (the default) behaves exactly as before.
+import { PassThrough } from "node:stream";
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import { loadConfig } from "../src/config.mjs";
+import { createState } from "../src/state.mjs";
+import { createHttpHandler } from "../src/http-routes.mjs";
+
+function buildCtx({ snapshotLive, snapshotStored } = {}) {
+  const config = loadConfig({ EUFY_EMAIL: "x@y.z", EUFY_PASSWORD: "pw" });
+  const state = createState();
+  const ctx = {
+    ...config,
+    eufy: {
+      getDevice: async () => ({
+        camera: () => ({
+          snapshotLive: snapshotLive ?? (async () => ({ jpeg: Buffer.from("live") })),
+          snapshotStored: snapshotStored,
+        }),
+      }),
+    },
+    state,
+    eventLog() {},
+    broadcast() {},
+    authStatus: () => ({ state: "ok" }),
+  };
+  state.flags.ready = true;
+  return { ctx, state };
+}
+
+async function get(handler, sn) {
+  const res = new PassThrough();
+  const chunks = [];
+  res.on("data", (c) => chunks.push(c));
+  let status;
+  let headers;
+  res.writeHead = (code, h) => {
+    status = code;
+    headers = h;
+  };
+  await handler({ url: `/snapshot/${sn}`, headers: { host: "localhost" }, on() {} }, res);
+  return { status, headers, body: () => Buffer.concat(chunks) };
+}
+
+test("serves the warm-up cache instantly, never touching the SDK", async () => {
+  const { ctx, state } = buildCtx({
+    snapshotLive: async () => {
+      throw new Error("should not be called — the cache should have served this");
+    },
+  });
+  state.snapshotCache.set("CAM1", { jpeg: Buffer.from("cached"), capturedAt: Date.now() });
+
+  const { status, body } = await get(createHttpHandler(ctx), "CAM1");
+  assert.equal(status, 200);
+  assert.deepEqual(body(), Buffer.from("cached"));
+});
+
+test("falls back to a live pull when the cache is empty (feature off, or not warmed yet)", async () => {
+  const { ctx } = buildCtx({ snapshotLive: async () => ({ jpeg: Buffer.from("live") }) });
+  const { status, body } = await get(createHttpHandler(ctx), "CAM1");
+  assert.equal(status, 200);
+  assert.deepEqual(body(), Buffer.from("live"));
+});
+
+test("falls back to the stored snapshot when a live pull fails and nothing is cached", async () => {
+  const { ctx } = buildCtx({
+    snapshotLive: async () => {
+      throw new Error("camera unreachable");
+    },
+    snapshotStored: async () => Buffer.from("stored"),
+  });
+  const { status, body } = await get(createHttpHandler(ctx), "CAM1");
+  assert.equal(status, 200);
+  assert.deepEqual(body(), Buffer.from("stored"));
+});

@@ -18,6 +18,7 @@ import { createEufy } from "./src/client.mjs";
 import { createFaces } from "./src/faces.mjs";
 import { createDeviceView } from "./src/device-view.mjs";
 import { createWarmup } from "./src/warmup.mjs";
+import { createSnapshotWarmup } from "./src/snapshot-warmup.mjs";
 import { createStreamIdle } from "./src/stream-idle.mjs";
 import { createWatchdog } from "./src/watchdog.mjs";
 import { createAuth } from "./src/auth.mjs";
@@ -53,6 +54,7 @@ Object.assign(
   createFaces(ctx),
   createDeviceView(ctx),
   createWarmup(ctx),
+  createSnapshotWarmup(ctx),
   createStreamIdle(ctx),
   createWatchdog(ctx),
   createAuth(ctx),
@@ -101,6 +103,7 @@ async function shutdown() {
   if (timers.watchdog) clearInterval(timers.watchdog);
   if (timers.streamIdle) clearInterval(timers.streamIdle);
   if (timers.rtspIdle) clearInterval(timers.rtspIdle);
+  if (timers.snapshotWarm) clearInterval(timers.snapshotWarm);
   flags.go2rtcProc?.kill();
   await closeStreamClients();
   await eufy.disconnect?.();
