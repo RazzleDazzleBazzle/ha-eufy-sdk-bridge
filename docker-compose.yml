@@ -2,10 +2,6 @@ services:
   ha-eufy-sdk-bridge:
     build:
       context: .
-      # The SDK (@mega-yfue/eufy-sdk) is a sibling checkout; the Dockerfile builds it from this named
-      # build context. Requires Compose v2.17+ (additional_contexts).
-      additional_contexts:
-        sdk: ../eufy-sdk
     image: ha-eufy-sdk-bridge:local
     container_name: ha-eufy-sdk-bridge
     restart: unless-stopped

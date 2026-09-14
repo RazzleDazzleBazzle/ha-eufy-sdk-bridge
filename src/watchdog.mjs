@@ -4,7 +4,7 @@
 // when nothing changed), so its silence is the stall signal; the FCM push channel is tracked separately
 // (events ride push, state rides poll). On a stall we re-establish realtime in place, and exit for a
 // clean restart (container `restart: unless-stopped`) if that fails.
-import { LoginStatus } from "@mega-yfue/eufy-sdk";
+import { LoginStatus } from "@razzledazzlebazzle/eufy-sdk";
 
 export function createWatchdog(ctx) {
   const { eufy, PUSH_STALL_MS } = ctx;

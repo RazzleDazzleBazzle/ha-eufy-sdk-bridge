@@ -3,7 +3,7 @@
 // client set and the two fan-out helpers (`send`, `broadcast`) that the rest of the bridge publishes
 // through — returned so server.mjs can hang them on ctx for auth.mjs / boot.mjs / http-routes.mjs.
 import { WebSocketServer } from "ws";
-import { listLightEffects } from "@mega-yfue/eufy-sdk";
+import { listLightEffects } from "@razzledazzlebazzle/eufy-sdk";
 
 export function createWsServer(ctx, httpServer) {
   const { cfg, eufy, SCHEMA_VERSION, DEBUG, dbg } = ctx;

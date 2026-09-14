@@ -2,7 +2,7 @@
 // it surfaces the need and lets the frontend answer. A cloud token kicked/expired AFTER boot is treated
 // as a first-class state (`reauth`) so HA stops trusting stale poll data, and re-login is attempted in
 // place. Reads cross-module functions (broadcast, completeBoot) off `ctx` at call time.
-import { LoginStatus } from "@mega-yfue/eufy-sdk";
+import { LoginStatus } from "@razzledazzlebazzle/eufy-sdk";
 
 export function createAuth(ctx) {
   const { eufy } = ctx;

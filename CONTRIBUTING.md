@@ -55,7 +55,7 @@ npm run format
 
 You don't build or publish images in a PR — CI does it automatically:
 
-- Merging to **`dev`** publishes `ghcr.io/mega-yfue/ha-eufy-sdk-bridge:dev`.
+- Merging to **`dev`** publishes `ghcr.io/razzledazzlebazzle/ha-eufy-sdk-bridge:dev`.
 - Publishing a **GitHub Release** (off `main`) builds and pushes the versioned + `:latest` tags.
 
 ## Reporting bugs

@@ -1,10 +1,11 @@
 # Publish the multi-arch bridge image to GitHub Container Registry on a release.
 #
 # Trigger: a published GitHub Release (the release tag names the version), or a manual run.
-# Output:  ghcr.io/mega-yfue/ha-eufy-sdk-bridge:<version> + :latest — one manifest carrying
+# Output:  ghcr.io/razzledazzlebazzle/ha-eufy-sdk-bridge:<version> + :latest — one manifest carrying
 #          linux/amd64 + linux/arm64 (node:24-alpine has no arm/v7 base).
 #
-# The SDK is a PUBLIC npm package (pulled by `npm ci` in the build), so no SDK checkout / build context.
+# The SDK installs straight from its GitHub fork at a pinned tag (pulled by `npm ci` in the build via
+# its own `prepare` build step), so no separate SDK checkout / build context is needed here either.
 # Uses the docker CLI in shell rather than the docker/* marketplace actions — inherited from the
 # upstream mega-yfue org's Actions policy (only actions owned by mega-yfue or created by GitHub), which
 # doesn't apply to this personal fork, but the docker-CLI approach works fine regardless and there was

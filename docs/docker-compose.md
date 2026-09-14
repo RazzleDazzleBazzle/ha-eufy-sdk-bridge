@@ -1,7 +1,7 @@
 # Running the bridge with Docker Compose
 
 The bridge is one container that logs into eufy **once** and exposes the SDK over a WebSocket (+ HTTP
-video) for the [`ha-eufy-sdk`](https://github.com/mega-yfue/ha-eufy-sdk) Home Assistant integration.
+video) for the [`ha-eufy-sdk`](https://github.com/RazzleDazzleBazzle/ha-eufy-sdk) Home Assistant integration.
 The published image already bundles the SDK and go2rtc, so you don't build anything — you pull and run.
 
 - **Image:** `ghcr.io/razzledazzlebazzle/ha-eufy-sdk-bridge:latest` (multi-arch: `amd64` · `arm64`)

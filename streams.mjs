@@ -11,7 +11,7 @@
 //
 // This is a workaround at the wrong layer; the right fix is session-per-stream INSIDE the SDK, after
 // which this whole file collapses to reusing the one control client.
-import { EufyMega, FileSessionStore, LoginStatus } from "@mega-yfue/eufy-sdk";
+import { EufyMega, FileSessionStore, LoginStatus } from "@razzledazzlebazzle/eufy-sdk";
 
 const clients = new Map(); // sn -> EufyMega
 

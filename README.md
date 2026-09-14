@@ -1,11 +1,11 @@
 # ha-eufy-sdk-bridge
 
-[![CI](https://github.com/mega-yfue/ha-eufy-sdk-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/mega-yfue/ha-eufy-sdk-bridge/actions/workflows/ci.yml)
+[![CI](https://github.com/RazzleDazzleBazzle/ha-eufy-sdk-bridge/actions/workflows/ci.yml/badge.svg)](https://github.com/RazzleDazzleBazzle/ha-eufy-sdk-bridge/actions/workflows/ci.yml)
 [![node](https://img.shields.io/badge/node-%E2%89%A524-brightgreen?logo=nodedotjs&logoColor=white)](./package.json)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 
 The host-facing daemon: one process that logs into eufy **once** and exposes the
-[`eufy-sdk`](https://github.com/mega-yfue/eufy-sdk) to a frontend — Home Assistant, a web UI,
+[`eufy-sdk`](https://github.com/RazzleDazzleBazzle/eufy-sdk) to a frontend — Home Assistant, a web UI,
 anything. Ships as a multi-arch Docker image with [go2rtc](https://github.com/AlexxIT/go2rtc)
 bundled, so live camera video is available as RTSP / WebRTC / MSE / HLS with nothing else to install.
 
@@ -40,10 +40,10 @@ or with Compose (`cp .env.example .env` first): `docker compose up -d`.
 
 | Repo                                                                  | Role                                          |
 | --------------------------------------------------------------------- | --------------------------------------------- |
-| [`eufy-sdk`](https://github.com/mega-yfue/eufy-sdk)                   | the HA-agnostic library                       |
+| [`eufy-sdk`](https://github.com/RazzleDazzleBazzle/eufy-sdk)          | the HA-agnostic library                       |
 | **`ha-eufy-sdk-bridge`**                                              | **this** — WS + HTTP + go2rtc daemon (Docker) |
 | [`ha-eufy-sdk-addon`](https://github.com/mega-yfue/ha-eufy-sdk-addon) | Home Assistant add-on wrapper                 |
-| [`ha-eufy-sdk`](https://github.com/mega-yfue/ha-eufy-sdk)             | the HACS integration (front door)             |
+| [`ha-eufy-sdk`](https://github.com/RazzleDazzleBazzle/ha-eufy-sdk)    | the HACS integration (front door)             |
 
 > Status: working — WS control + auth-over-WS (2FA/captcha), device listing, snapshots, and go2rtc
 > streaming. Published image: `ghcr.io/razzledazzlebazzle/ha-eufy-sdk-bridge` (multi-arch: `amd64` · `arm64`).
@@ -60,9 +60,9 @@ are cut.
 
 ## Develop
 
-The bridge is ESM (no build step) and depends on the SDK as a normal npm package
-([`@mega-yfue/eufy-sdk`](https://www.npmjs.com/package/@mega-yfue/eufy-sdk)) — `npm install` pulls it
-from the registry, no sibling checkout needed.
+The bridge is ESM (no build step) and depends on the SDK
+([`@razzledazzlebazzle/eufy-sdk`](https://github.com/RazzleDazzleBazzle/eufy-sdk)) directly from its
+GitHub fork at a pinned tag — `npm install` clones, builds, and pulls it in, no sibling checkout needed.
 
 ```bash
 npm install

@@ -4,10 +4,10 @@
 # (RTSP/WebRTC/MSE/HLS); bundling it means the user still installs exactly one thing.
 #
 # ── SDK sourcing ────────────────────────────────────────────────────────────────────────────────────
-# The SDK (@mega-yfue/eufy-sdk) is a PUBLIC scoped package on npm, so it installs like any dependency —
-# `npm install` pulls it (and its runtime deps: mqtt / protobufjs / werift) from the registry, no auth,
-# no build context, no sibling checkout. The pinned version lives in package.json; bump it there to move
-# the bridge to a newer SDK release. Build with just:
+# The SDK (@razzledazzlebazzle/eufy-sdk) installs straight from its GitHub fork at a pinned tag — no
+# npm publish, no auth, no sibling checkout. `npm install` clones the tag, runs its own `prepare` build
+# step, and pulls in its runtime deps (mqtt / protobufjs). The pinned tag lives in package.json; bump it
+# there to move the bridge to a newer SDK commit. Build with just:
 #     docker build -t ha-eufy-sdk-bridge .
 FROM node:24-alpine
 RUN apk add --no-cache ffmpeg curl
@@ -28,7 +28,7 @@ RUN case "${TARGETARCH:-amd64}" in \
       "https://github.com/AlexxIT/go2rtc/releases/download/v${GO2RTC_VERSION}/${g2}" \
  && chmod +x /usr/local/bin/go2rtc
 
-# Install the bridge's deps from npm: the SDK (@mega-yfue/eufy-sdk → pulls mqtt/protobufjs/werift) + ws.
+# Install the bridge's deps: the SDK (@razzledazzlebazzle/eufy-sdk → pulls mqtt/protobufjs) + ws.
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
