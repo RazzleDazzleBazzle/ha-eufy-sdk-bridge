@@ -74,14 +74,17 @@ export function createBoot(ctx) {
         timers.snapshotWarm ??= setInterval(() => void ctx.snapshotWarmupTick(), cfg.snapshotWarmMs);
       console.log(`[bridge] ready — ${summaries.length} devices, ${cams.length} camera stream(s)`);
       ctx.broadcast({ event: "ready", schemaVersion: SCHEMA_VERSION });
-      // The first two read the P2P DB via a shared `dbChunk` stream — run sequentially so their
-      // accumulators don't cross-contaminate. The snapshot sweep uses a different P2P resource (a live
-      // media start, not a DB query) but still runs after them rather than piling everything onto the
-      // session at once right at boot. Non-blocking so `ready` isn't held up.
+      // Read the P2P DB via a shared `dbChunk` stream — run sequentially so their accumulators don't
+      // cross-contaminate. Non-blocking so `ready` isn't held up. Deliberately does NOT also kick
+      // `snapshotWarmupTick` here: boot already pays for one full account-wide `deviceList()` above (for
+      // go2rtc), and HA's own coordinator polls `devices.list` within seconds of seeing the bridge go
+      // ready — piling a live P2P sweep across every camera on top of that, at that exact moment, was
+      // observed starving the coordinator's poll past its 15s timeout (recovering only on the NEXT
+      // scheduled poll, 10 min later). The periodic timer below still runs the sweep on its own schedule;
+      // the cache is just cold for the first interval instead of pre-warmed at boot.
       void (async () => {
         await ctx.warmFaceRoster(); // resolve person_id -> name for face-recognition events
         await ctx.warmLastEventImages(); // populate "Last event" from local HomeBase storage on first load
-        await ctx.snapshotWarmupTick?.(); // populate the /snapshot cache instead of waiting a full interval
       })();
     } finally {
       flags.booting = false;
