@@ -90,6 +90,11 @@ export function createHttpHandler(ctx) {
       if (!cam?.openReadable) throw new NoLiveVideoError("no live video on this device");
       const feed = await cam.openReadable(); // node Readable of Annex-B
       ctx.eventLog(`/stream ${sn} → P2P feed open (${Date.now() - t0}ms)`);
+      // "Feed open" above is just the Readable object existing — openReadable() doesn't wait for a
+      // frame. This is the timestamp that actually matters for a "why does Home take 20s" investigation:
+      // the first real Annex-B byte the P2P layer delivers, which is also the earliest moment go2rtc (and
+      // everything downstream of it — HAFFmpeg, then Home) could possibly have anything to work with.
+      feed.once("data", () => ctx.eventLog(`/stream ${sn} → first video byte (${Date.now() - t0}ms)`));
       // The feed's own lifecycle → real teardown, attached once for as long as this feed object lives
       // (a reconnect within the grace period, or a second consumer joining it, reuses the SAME feed,
       // so this must not be re-attached each time — see attachConsumer's own comment).
