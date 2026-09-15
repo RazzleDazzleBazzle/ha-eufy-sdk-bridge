@@ -1,9 +1,12 @@
 // Realtime liveness watchdog. The SDK's poll loop re-arms via `pollOnce().finally(schedulePoll)`, so a
 // cloud call that HANGS (half-open socket, no timeout) never settles → the loop stalls forever while the
-// WS server stays up serving stale state. `deviceState` fires on every healthy poll (proof-of-life even
-// when nothing changed), so its silence is the stall signal; the FCM push channel is tracked separately
-// (events ride push, state rides poll). On a stall we re-establish realtime in place, and exit for a
-// clean restart (container `restart: unless-stopped`) if that fails.
+// WS server stays up serving stale state. `pollOk` (eufy-sdk v0.1.8+) fires on every healthy poll pass
+// regardless of whether anything changed, so its silence is the stall signal — `deviceState` alone is
+// NOT enough here, since it only fires for a device that actually reported something new and stays
+// silent through a perfectly healthy but quiet stretch, which used to trip this watchdog for no real
+// reason (see boot.mjs). The FCM push channel is tracked separately (events ride push, state rides poll).
+// On a stall we re-establish realtime in place, and exit for a clean restart (container
+// `restart: unless-stopped`) if that fails.
 import { LoginStatus } from "@razzledazzlebazzle/eufy-sdk";
 
 export function createWatchdog(ctx) {

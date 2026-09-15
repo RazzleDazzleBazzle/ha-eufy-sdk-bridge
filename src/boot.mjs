@@ -31,7 +31,15 @@ export function createBoot(ctx) {
     if (flags.ready || flags.booting) return;
     flags.booting = true;
     try {
-      eufy.on("deviceState", ctx.bumpActivity); // poll heartbeat — the watchdog's liveness signal
+      // The watchdog's poll-liveness signal. `pollOk` (eufy-sdk v0.1.8+) is the real one: it fires on
+      // every completed poll pass regardless of whether anything changed. `deviceState` alone isn't
+      // enough — it only fires for a device whose lastSeenMs advanced, so a genuinely healthy but quiet
+      // stretch (nothing new to report account-wide) produced zero deviceState emissions and tripped the
+      // watchdog's 30-minute stall threshold for no real reason, forcing an unnecessary disconnect+relogin
+      // (observed twice on real hardware). Kept alongside pollOk rather than replaced by it — a device
+      // actually reporting is still a perfectly good liveness signal too.
+      eufy.on("pollOk", ctx.bumpActivity);
+      eufy.on("deviceState", ctx.bumpActivity);
       if (DEBUG) {
         eufy.on("p2pConnect", (sn) => dbg(`p2pConnect station=${sn}`));
         eufy.on("p2pClose", (sn) => dbg(`p2pClose station=${sn}`));
