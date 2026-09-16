@@ -158,11 +158,13 @@ export function createHttpHandler(ctx) {
 
     // A current still: a fresh live burst, falling back to the retained push thumbnail.
     if (kind === "snapshot" && sn) {
+      const t0 = Date.now();
       // Warmed by snapshot-warmup.mjs's own schedule (when SNAPSHOT_WARM_INTERVAL_MIN is set) — serve it
       // instantly instead of paying for a live P2P pull on every request. Empty until that feature is
       // enabled AND has run at least once, so this never changes behaviour for anyone not opting in.
       const cached = snapshotCache.get(sn);
       if (cached) {
+        ctx.eventLog(`/snapshot ${sn} → 200 warm cache (${cached.jpeg.length}B)`);
         res.writeHead(200, { "content-type": "image/jpeg", "content-length": cached.jpeg.length });
         return res.end(cached.jpeg);
       }
@@ -173,28 +175,49 @@ export function createHttpHandler(ctx) {
       // throughout — every step is a soft fallback to the next, ending in 404 rather than a hard error.
       if (cfg.snapshotNoLiveDevices?.has(sn)) {
         const cam = (await eufy.getDevice(sn).catch(() => undefined))?.camera?.();
-        if (!cam) return json(res, 404, { error: "no camera on this device" });
-        let jpeg = await cam.snapshotStored?.().catch(() => undefined);
-        if (!jpeg) {
-          jpeg = await fs.promises.readFile(path.join(eventImageDir, `last-event-${sn}.jpg`)).catch(() => undefined);
+        if (!cam) {
+          ctx.eventLog(`/snapshot ${sn} → 404 no camera on device (no-live)`);
+          return json(res, 404, { error: "no camera on this device" });
         }
-        if (!jpeg) return json(res, 404, { error: "no image available" });
+        let jpeg = await cam.snapshotStored?.().catch(() => undefined);
+        if (jpeg) {
+          ctx.eventLog(`/snapshot ${sn} → 200 retained (${jpeg.length}B, no-live) (${Date.now() - t0}ms)`);
+        } else {
+          jpeg = await fs.promises.readFile(path.join(eventImageDir, `last-event-${sn}.jpg`)).catch(() => undefined);
+          if (jpeg)
+            ctx.eventLog(`/snapshot ${sn} → 200 last-event file (${jpeg.length}B, no-live) (${Date.now() - t0}ms)`);
+        }
+        if (!jpeg) {
+          ctx.eventLog(`/snapshot ${sn} → 404 no image available (no-live) (${Date.now() - t0}ms)`);
+          return json(res, 404, { error: "no image available" });
+        }
         res.writeHead(200, { "content-type": "image/jpeg", "content-length": jpeg.length });
         return res.end(jpeg);
       }
       try {
         const cam = (await eufy.getDevice(sn)).camera?.();
-        if (!cam) return json(res, 404, { error: "no camera on this device" });
-        let jpeg;
+        if (!cam) {
+          ctx.eventLog(`/snapshot ${sn} → 404 no camera on device`);
+          return json(res, 404, { error: "no camera on this device" });
+        }
+        let jpeg, retained;
         try {
-          ({ jpeg } = await cam.snapshotLive());
-        } catch {
+          ({ jpeg, retained } = await cam.snapshotLive());
+        } catch (liveError) {
+          ctx.eventLog(`/snapshot ${sn} → live failed (${Date.now() - t0}ms): ${liveError?.message ?? liveError}`);
           jpeg = await cam.snapshotStored?.(); // may throw when nothing is retained
         }
-        if (!jpeg) return json(res, 404, { error: "no image available" });
+        if (!jpeg) {
+          ctx.eventLog(`/snapshot ${sn} → 404 no image available (${Date.now() - t0}ms)`);
+          return json(res, 404, { error: "no image available" });
+        }
+        ctx.eventLog(
+          `/snapshot ${sn} → 200 ${retained ? "retained (SDK fallback)" : "live"} (${jpeg.length}B) (${Date.now() - t0}ms)`,
+        );
         res.writeHead(200, { "content-type": "image/jpeg", "content-length": jpeg.length });
         return res.end(jpeg);
       } catch (e) {
+        ctx.eventLog(`/snapshot ${sn} → 502 FAILED (${Date.now() - t0}ms): ${e?.message ?? e}`);
         return json(res, 502, { error: String(e?.message ?? e) });
       }
     }
