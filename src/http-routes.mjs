@@ -205,15 +205,26 @@ export function createHttpHandler(ctx) {
           ({ jpeg, retained } = await cam.snapshotLive());
         } catch (liveError) {
           ctx.eventLog(`/snapshot ${sn} → live failed (${Date.now() - t0}ms): ${liveError?.message ?? liveError}`);
-          jpeg = await cam.snapshotStored?.(); // may throw when nothing is retained
+          jpeg = await cam.snapshotStored?.().catch(() => undefined);
         }
+        if (jpeg) {
+          ctx.eventLog(
+            `/snapshot ${sn} → 200 ${retained ? "retained (SDK fallback)" : "live"} (${jpeg.length}B) (${Date.now() - t0}ms)`,
+          );
+          res.writeHead(200, { "content-type": "image/jpeg", "content-length": jpeg.length });
+          return res.end(jpeg);
+        }
+        // Same last resort the no-live path above already has: live AND the SDK's own retained still
+        // both came up empty (e.g. a sibling on the same HomeBase held the station AND nothing was ever
+        // retained for this camera), so reach for this bridge's own persisted "Last event" cover before
+        // giving up. Cheap, already on disk, and a real answer beats a 502 for a tile that just wants
+        // SOMETHING to show.
+        jpeg = await fs.promises.readFile(path.join(eventImageDir, `last-event-${sn}.jpg`)).catch(() => undefined);
         if (!jpeg) {
           ctx.eventLog(`/snapshot ${sn} → 404 no image available (${Date.now() - t0}ms)`);
           return json(res, 404, { error: "no image available" });
         }
-        ctx.eventLog(
-          `/snapshot ${sn} → 200 ${retained ? "retained (SDK fallback)" : "live"} (${jpeg.length}B) (${Date.now() - t0}ms)`,
-        );
+        ctx.eventLog(`/snapshot ${sn} → 200 last-event file (${jpeg.length}B) (${Date.now() - t0}ms)`);
         res.writeHead(200, { "content-type": "image/jpeg", "content-length": jpeg.length });
         return res.end(jpeg);
       } catch (e) {

@@ -134,3 +134,38 @@ test("a no-live camera 404s (not 502) when truly nothing is available anywhere",
   const { status } = await get(createHttpHandler(ctx), "CAM1");
   assert.equal(status, 404);
 });
+
+test("the default (live) path also falls back to the persisted Last-event file when live AND stored both fail", async (t) => {
+  // Exactly the StationBusyError case: a sibling camera on the same HomeBase holds the station, the
+  // SDK's own retained-still fallback has nothing either, and snapshotStored() rejects — this used to
+  // 502 outright even though a perfectly good "Last event" cover was sitting right there on disk.
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "http-snapshot-"));
+  t.after(() => fs.rm(tmpDir, { recursive: true, force: true }));
+  await fs.writeFile(path.join(tmpDir, "last-event-CAM1.jpg"), Buffer.from("last-event"));
+
+  const { ctx } = buildCtx({
+    snapshotLive: async () => {
+      throw new Error("the station is already serving channel 4 to a viewer");
+    },
+    snapshotStored: async () => {
+      throw new Error("No stored snapshot is available");
+    },
+    eventImageDir: tmpDir,
+  });
+  const { status, body } = await get(createHttpHandler(ctx), "CAM1");
+  assert.equal(status, 200);
+  assert.deepEqual(body(), Buffer.from("last-event"));
+});
+
+test("the default (live) path 404s (not 502) when live, stored, AND the last-event file are all unavailable", async () => {
+  const { ctx } = buildCtx({
+    snapshotLive: async () => {
+      throw new Error("camera unreachable");
+    },
+    snapshotStored: async () => {
+      throw new Error("nothing retained");
+    },
+  });
+  const { status } = await get(createHttpHandler(ctx), "CAM1");
+  assert.equal(status, 404);
+});
