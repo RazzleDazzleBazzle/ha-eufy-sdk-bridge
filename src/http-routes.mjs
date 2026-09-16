@@ -208,6 +208,12 @@ export function createHttpHandler(ctx) {
           jpeg = await cam.snapshotStored?.().catch(() => undefined);
         }
         if (jpeg) {
+          // A genuine live win (not the SDK's own retained fallback) is the freshest picture anyone's
+          // going to get for this camera for a while — cache it so the NEXT request that loses the
+          // sibling race to this same camera gets this recent frame instead of falling all the way
+          // back to a possibly much older "Last event" motion capture. Doesn't touch that file at all:
+          // this is purely a /snapshot freshness cache, not a claim that anything was detected.
+          if (!retained) snapshotCache.set(sn, { jpeg, capturedAt: Date.now() });
           ctx.eventLog(
             `/snapshot ${sn} → 200 ${retained ? "retained (SDK fallback)" : "live"} (${jpeg.length}B) (${Date.now() - t0}ms)`,
           );

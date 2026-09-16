@@ -69,6 +69,40 @@ test("falls back to a live pull when the cache is empty (feature off, or not war
   assert.deepEqual(body(), Buffer.from("live"));
 });
 
+test("a genuine live win populates the warm cache, so a later loser gets it instead of an old Last-event file", async () => {
+  const { ctx, state } = buildCtx({ snapshotLive: async () => ({ jpeg: Buffer.from("live") }) });
+  const handler = createHttpHandler(ctx);
+
+  const first = await get(handler, "CAM1");
+  assert.equal(first.status, 200);
+  assert.deepEqual(state.snapshotCache.get("CAM1")?.jpeg, Buffer.from("live"));
+
+  // A later request for the same camera — even one that would itself fail to go live (e.g. lost the
+  // sibling race) — must hit the now-warm cache before ever trying live again.
+  const failingCtx = {
+    ...ctx,
+    eufy: {
+      getDevice: async () => ({
+        camera: () => ({
+          snapshotLive: () => Promise.reject(new Error("should not be called — the cache should have served this")),
+        }),
+      }),
+    },
+  };
+  const second = await get(createHttpHandler(failingCtx), "CAM1");
+  assert.equal(second.status, 200);
+  assert.deepEqual(second.body(), Buffer.from("live"));
+});
+
+test("does NOT cache the SDK's own retained fallback as if it were a fresh live win", async () => {
+  const { ctx, state } = buildCtx({
+    snapshotLive: async () => ({ jpeg: Buffer.from("retained-bytes"), retained: true }),
+  });
+  const { status } = await get(createHttpHandler(ctx), "CAM1");
+  assert.equal(status, 200);
+  assert.equal(state.snapshotCache.has("CAM1"), false);
+});
+
 test("falls back to the stored snapshot when a live pull fails and nothing is cached", async () => {
   const { ctx } = buildCtx({
     snapshotLive: async () => {
