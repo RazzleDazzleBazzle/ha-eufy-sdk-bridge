@@ -3,7 +3,9 @@
 // but returns immediately, so listeners and timers are never double-wired. Non-critical warm-ups are
 // kicked off after `ready` so they don't hold up serving.
 import { spawn } from "node:child_process";
+import readline from "node:readline";
 import { writeGo2rtcConfig } from "../go2rtc-config.mjs";
+import { createGo2rtcRecovery } from "./go2rtc-recover.mjs";
 
 export function createBoot(ctx) {
   const { cfg, eufy, DEBUG, SCHEMA_VERSION, dbg, DETECTION_EVENTS, FORWARDED_EVENTS } = ctx;
@@ -13,7 +15,22 @@ export function createBoot(ctx) {
   function startGo2rtc() {
     if (flags.go2rtcProc) return;
     try {
-      flags.go2rtcProc = spawn("go2rtc", ["-config", cfg.go2rtcConfig], { stdio: "inherit" });
+      // Piped (not "inherit") so go2rtc's own lines can be watched for its exec-producer stuck
+      // state (see go2rtc-recover.mjs) — re-printed below line by line so `docker logs` output is
+      // otherwise unchanged. stdout/stderr are watched and re-printed separately, preserving which
+      // stream each line originally went to.
+      flags.go2rtcProc = spawn("go2rtc", ["-config", cfg.go2rtcConfig], {
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const recovery = createGo2rtcRecovery(cfg, { eventLog: ctx.eventLog });
+      readline.createInterface({ input: flags.go2rtcProc.stdout }).on("line", (line) => {
+        console.log(line);
+        recovery.watchLine(line);
+      });
+      readline.createInterface({ input: flags.go2rtcProc.stderr }).on("line", (line) => {
+        console.error(line);
+        recovery.watchLine(line);
+      });
       flags.go2rtcProc.on("error", (e) =>
         console.error(`[bridge] go2rtc not started (${e.message}) — WS/control still up`),
       );

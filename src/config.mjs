@@ -75,6 +75,10 @@ export function loadConfig(env = process.env) {
     port: Number(env.BRIDGE_PORT || 3000),
     session: env.EUFY_SESSION || "./data/.eufy-session.json",
     go2rtcConfig: env.GO2RTC_CONFIG || "./go2rtc.yaml",
+    // go2rtc's own REST API port — written into the generated go2rtc.yaml (see go2rtc-config.mjs)
+    // AND used by go2rtc-recover.mjs to reset a stream stuck by go2rtc's own exec-producer race
+    // (AlexxIT/go2rtc#163 / #1204). Both must stay in sync, hence one shared cfg field.
+    go2rtcApiPort: Number(env.GO2RTC_API_PORT || 1984),
     selfHost: env.BRIDGE_SELF_HOST || "127.0.0.1",
     // Cloud poll interval (ms). Unset → the SDK default (600000 = 10 min). Changeable live via the
     // config.set WS command. 0 disables polling.
