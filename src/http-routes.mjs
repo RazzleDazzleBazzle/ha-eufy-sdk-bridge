@@ -4,6 +4,7 @@
 // request handler; server.mjs wraps it in http.createServer.
 import fs from "node:fs";
 import path from "node:path";
+import { createGo2rtcFrame } from "./go2rtc-frame.mjs";
 
 function json(res, code, body) {
   const s = JSON.stringify(body);
@@ -27,6 +28,7 @@ export function createHttpHandler(ctx) {
     pendingOpens,
     snapshotCache,
   } = ctx.state;
+  const { grabFrameToCache } = createGo2rtcFrame(cfg, { eventLog: ctx.eventLog, fetchImpl: ctx.fetchImpl });
 
   // Actually tear a feed down: stop the P2P pull for real and, if it had been reported as streaming,
   // broadcast the "off" edge. Idempotent — safe to call from either lifecycle path (a consumer that
@@ -94,7 +96,12 @@ export function createHttpHandler(ctx) {
       // frame. This is the timestamp that actually matters for a "why does Home take 20s" investigation:
       // the first real Annex-B byte the P2P layer delivers, which is also the earliest moment go2rtc (and
       // everything downstream of it — HAFFmpeg, then Home) could possibly have anything to work with.
-      feed.once("data", () => ctx.eventLog(`/stream ${sn} → first video byte (${Date.now() - t0}ms)`));
+      feed.once("data", () => {
+        ctx.eventLog(`/stream ${sn} → first video byte (${Date.now() - t0}ms)`);
+        // Free side effect of a genuine live viewer: go2rtc is already decoding this same feed for
+        // the live view itself, so grabbing a frame from it costs nothing extra — see go2rtc-frame.mjs.
+        void grabFrameToCache(sn, snapshotCache);
+      });
       // The feed's own lifecycle → real teardown, attached once for as long as this feed object lives
       // (a reconnect within the grace period, or a second consumer joining it, reuses the SAME feed,
       // so this must not be re-attached each time — see attachConsumer's own comment).

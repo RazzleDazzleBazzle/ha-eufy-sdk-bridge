@@ -124,3 +124,40 @@ test("a camera with no live video is a 404, not a 502", async () => {
   await done;
   assert.equal(status, 404);
 });
+
+test("the first real video byte piggybacks a snapshot-cache refresh from go2rtc's own frame.jpeg", async () => {
+  const frameCalls = [];
+  const ctx = buildCtx();
+  ctx.fetchImpl = async (url) => {
+    frameCalls.push(url);
+    return { ok: true, arrayBuffer: async () => Buffer.from("jpeg-bytes") };
+  };
+  const handler = createHttpHandler(ctx);
+
+  const { done } = await get(handler, "CAM1");
+  await done;
+  lastFeed.emit("data", Buffer.from("h264-bytes"));
+  await new Promise((r) => setImmediate(r)); // let the fire-and-forget grab run
+
+  assert.equal(frameCalls.length, 1);
+  assert.match(frameCalls[0], /\/api\/frame\.jpeg\?src=CAM1$/);
+  assert.deepEqual(ctx.state.snapshotCache.get("CAM1").jpeg, Buffer.from("jpeg-bytes"));
+});
+
+test("a second data event on the same feed does not re-trigger the snapshot grab", async () => {
+  const frameCalls = [];
+  const ctx = buildCtx();
+  ctx.fetchImpl = async (url) => {
+    frameCalls.push(url);
+    return { ok: true, arrayBuffer: async () => Buffer.from("jpeg-bytes") };
+  };
+  const handler = createHttpHandler(ctx);
+
+  const { done } = await get(handler, "CAM1");
+  await done;
+  lastFeed.emit("data", Buffer.from("h264-bytes-1"));
+  lastFeed.emit("data", Buffer.from("h264-bytes-2"));
+  await new Promise((r) => setImmediate(r));
+
+  assert.equal(frameCalls.length, 1, "feed.once — only the first data event of this feed's lifetime grabs a frame");
+});
