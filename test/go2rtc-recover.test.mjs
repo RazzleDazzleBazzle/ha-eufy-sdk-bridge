@@ -8,6 +8,8 @@ import { createGo2rtcRecovery } from "../src/go2rtc-recover.mjs";
 
 const STUCK_LINE = '00:33:27.790 WRN [rtsp] error="streams: exec: timeout" stream=T8160P1122453F5B';
 
+const noDelay = async () => {};
+
 function buildRecovery(overrides = {}) {
   const calls = [];
   const fetchImpl = async (url, init) => {
@@ -16,7 +18,7 @@ function buildRecovery(overrides = {}) {
   };
   const cfg = { go2rtcApiPort: 1984, selfHost: "127.0.0.1", port: 3000, streamFps: 15, ...overrides };
   const logs = [];
-  const recovery = createGo2rtcRecovery(cfg, { eventLog: (m) => logs.push(m), fetchImpl });
+  const recovery = createGo2rtcRecovery(cfg, { eventLog: (m) => logs.push(m), fetchImpl, delay: noDelay });
   return { recovery, calls, logs };
 }
 
@@ -62,7 +64,7 @@ test("a stuck line for a DIFFERENT stream resets independently of another stream
   assert.deepEqual(forF48.map((c) => c.method).sort(), ["DELETE", "PUT"]);
 });
 
-test("a fetch failure is logged, not thrown", async () => {
+test("a network-level fetch failure is logged, not thrown", async () => {
   const cfg = { go2rtcApiPort: 1984, selfHost: "127.0.0.1", port: 3000, streamFps: 15 };
   const logs = [];
   const recovery = createGo2rtcRecovery(cfg, {
@@ -70,9 +72,30 @@ test("a fetch failure is logged, not thrown", async () => {
     fetchImpl: async () => {
       throw new Error("connection refused");
     },
+    delay: noDelay,
   });
   recovery.watchLine(STUCK_LINE);
   await new Promise((r) => setImmediate(r));
   assert.equal(logs.length, 1);
   assert.match(logs[0], /reset FAILED.*connection refused/);
+});
+
+test("an HTTP error response (not just a network failure) is treated as a failure and logged with detail", async () => {
+  // The actual bug this guards against: go2rtc's own PUT/DELETE handlers answer a non-2xx status on
+  // failure rather than dropping the connection — `fetch` does NOT reject on that by itself, so a
+  // naive `await fetchImpl(...)` with no status check would silently treat this as success.
+  const cfg = { go2rtcApiPort: 1984, selfHost: "127.0.0.1", port: 3000, streamFps: 15 };
+  const logs = [];
+  const recovery = createGo2rtcRecovery(cfg, {
+    eventLog: (m) => logs.push(m),
+    fetchImpl: async (url, init) =>
+      init.method === "PUT" ? { ok: false, status: 400, text: async () => "already exists" } : { ok: true },
+    delay: noDelay,
+  });
+  recovery.watchLine(STUCK_LINE);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /reset FAILED/);
+  assert.match(logs[0], /400/);
+  assert.match(logs[0], /already exists/);
 });

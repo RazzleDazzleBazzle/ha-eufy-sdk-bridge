@@ -20,6 +20,8 @@
 // camera, for a problem that only bites on the first cold view after a while).
 import { go2rtcSourceUrl } from "../go2rtc-config.mjs";
 
+const defaultDelay = (ms) => new Promise((r) => setTimeout(r, ms));
+
 // Confirmed against real go2rtc 1.9.9 logs (see project memory / commit history for the captured
 // line): `WRN [rtsp] error="streams: exec: timeout" stream=<sn>`. go2rtc's own log format prefixes
 // this with a timestamp and level that vary by build, so the pattern only anchors on the stable
@@ -33,8 +35,23 @@ const STUCK_PATTERN = /\[rtsp\] error="streams: exec: timeout" stream=(\S+)/;
 // tight reset loop hammering go2rtc's API.
 const MIN_RESET_GAP_MS = 5_000;
 
-export function createGo2rtcRecovery(cfg, { eventLog, fetchImpl = fetch } = {}) {
+// Between DELETE and PUT, giving go2rtc's own teardown of the old Stream object (and whatever it's
+// still doing with the killed exec process underneath — its own bug reports describe process
+// reaping as the confusing part) a moment to settle before a same-named stream is redefined,
+// rather than racing a recreate against a delete that may not be fully synchronous internally.
+const RECREATE_DELAY_MS = 500;
+
+export function createGo2rtcRecovery(cfg, { eventLog, fetchImpl = fetch, delay = defaultDelay } = {}) {
   const lastResetAt = new Map(); // sn -> ms of this module's last reset for it
+
+  /** `fetchImpl` rejects only on network failure — an HTTP error status must be checked explicitly. */
+  async function call(method, url) {
+    const res = await fetchImpl(url, { method });
+    if (!res.ok) {
+      const body = await res.text?.().catch(() => "");
+      throw new Error(`${method} ${url} → ${res.status}${body ? `: ${body}` : ""}`);
+    }
+  }
 
   async function resetStream(sn) {
     const now = Date.now();
@@ -46,10 +63,9 @@ export function createGo2rtcRecovery(cfg, { eventLog, fetchImpl = fetch } = {}) 
       // DELETE clears go2rtc's in-memory Stream object for this id entirely — the surgical version
       // of the reset a full go2rtc restart would otherwise be needed for. PUT then redefines it
       // fresh, identical to what go2rtc-config.mjs already wrote for this camera at boot.
-      await fetchImpl(`${api}?src=${encodeURIComponent(sn)}`, { method: "DELETE" });
-      await fetchImpl(`${api}?name=${encodeURIComponent(sn)}&src=${encodeURIComponent(go2rtcSourceUrl(cfg, sn))}`, {
-        method: "PUT",
-      });
+      await call("DELETE", `${api}?src=${encodeURIComponent(sn)}`);
+      await delay(RECREATE_DELAY_MS);
+      await call("PUT", `${api}?name=${encodeURIComponent(sn)}&src=${encodeURIComponent(go2rtcSourceUrl(cfg, sn))}`);
       eventLog?.(`go2rtc producer stuck for ${sn} — reset stream`);
     } catch (e) {
       eventLog?.(`go2rtc producer stuck for ${sn} — reset FAILED (${e?.message ?? e})`);
