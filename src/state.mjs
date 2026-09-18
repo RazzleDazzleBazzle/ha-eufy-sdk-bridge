@@ -54,5 +54,12 @@ export function createState() {
     // snapshot-warmup.mjs. Empty (feature off, or not yet run once) falls back to today's on-demand
     // live-then-stored behaviour.
     snapshotCache: new Map(),
+
+    // Serials with a `/stream` (i.e. cameras), as of the last full deviceList() from ANY caller — boot,
+    // an HA `devices.list` poll, or a previous sweep. Which devices are cameras essentially never
+    // changes, so the periodic snapshot sweep reads this instead of paying for its own fresh
+    // account-wide fetch every tick — see deviceList() in device-view.mjs and snapshotWarmupTick() in
+    // snapshot-warmup.mjs. Populated before boot arms the sweep's timer, so never empty when it's read.
+    cameraTargets: [],
   };
 }

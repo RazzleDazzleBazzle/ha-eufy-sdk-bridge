@@ -29,13 +29,15 @@ async function buildCtx({ devices = [CAM1, CAM2], overrides = {}, liveJpegFor = 
     ...overrides,
   });
   const state = createState();
+  // Mirrors what deviceList() itself would have populated on the last real fetch (boot, or an HA
+  // devices.list poll) — the sweep now reads this instead of fetching its own fresh list.
+  state.cameraTargets = devices.filter((d) => d.stream).map((d) => d.sn);
   const liveCalls = [];
   const ctx = {
     ...config,
     eventImageDir: tmpDir,
     state,
     eventLog() {},
-    deviceList: async () => devices,
     eufy: {
       getDevice: async (sn) => ({
         camera: () => ({

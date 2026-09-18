@@ -58,9 +58,14 @@ export function createDeviceView(ctx) {
 
   async function deviceList() {
     const devices = await eufy.getDevices();
-    return Promise.all(
+    const described = await Promise.all(
       devices.map((d) => describeDevice(d.sn).catch((e) => ({ sn: d.sn, error: String(e?.message ?? e) }))),
     );
+    // Opportunistic side effect: whoever asked for the full list just paid for it, so the periodic
+    // snapshot sweep gets to reuse this account-wide fetch's camera roster instead of doing its own.
+    // See cameraTargets in state.mjs.
+    ctx.state.cameraTargets = described.filter((d) => d.stream).map((d) => d.sn);
+    return described;
   }
 
   return { describeDevice, propertyState, propertySpecs, deviceList };

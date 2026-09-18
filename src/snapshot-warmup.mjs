@@ -60,22 +60,25 @@ export function createSnapshotWarmup(ctx) {
     }
   }
 
-  /** One full staggered sweep across every (optionally allow-listed) camera. */
+  /**
+   * One full staggered sweep across every (optionally allow-listed) camera.
+   *
+   * Reads the camera roster from `ctx.state.cameraTargets` — populated as a side effect of the last
+   * full deviceList() ANY caller made (boot, or an HA `devices.list` poll) — rather than calling
+   * deviceList() itself. deviceList() pays for one Eufy-cloud HTTP round-trip per device; doing that
+   * again here on every sweep tick meant this sweep and HA's own poll could both be mid-fan-out at
+   * once, doubling concurrent cloud load right when a coincidental overlap landed. Which devices ARE
+   * cameras essentially never changes, so riding whatever the last real fetch already learned is fine.
+   */
   async function snapshotWarmupTick() {
     if (!cfg.snapshotWarmMs || sweeping) return;
     sweeping = true;
     try {
-      let devices;
-      try {
-        devices = await ctx.deviceList();
-      } catch {
-        return;
-      }
-      const targets = devices.filter(
-        (d) => d.stream && (!cfg.snapshotWarmDevices || cfg.snapshotWarmDevices.has(d.sn)),
+      const targets = ctx.state.cameraTargets.filter(
+        (sn) => !cfg.snapshotWarmDevices || cfg.snapshotWarmDevices.has(sn),
       );
-      for (const d of targets) {
-        await warmOne(d.sn);
+      for (const sn of targets) {
+        await warmOne(sn);
         if (cfg.snapshotWarmStaggerMs) await new Promise((r) => setTimeout(r, cfg.snapshotWarmStaggerMs));
       }
     } finally {

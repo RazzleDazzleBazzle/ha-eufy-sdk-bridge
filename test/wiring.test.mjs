@@ -89,7 +89,7 @@ async function wsCall(ctx, msg) {
 }
 
 test("device view: describe shape + camera vs sensor", async () => {
-  const { ctx, httpServer } = buildCtx();
+  const { ctx, state, httpServer } = buildCtx();
   const list = await ctx.deviceList();
   const cam = list.find((d) => d.sn === "CAM1");
   const sensor = list.find((d) => d.sn === "SENSOR1");
@@ -99,6 +99,8 @@ test("device view: describe shape + camera vs sensor", async () => {
   assert.equal(cam.canReboot, false);
   assert.deepEqual(cam.state, { battery: 74, motion: false });
   assert.equal(sensor.stream, undefined); // not a camera
+  // The snapshot sweep reads this instead of paying for its own deviceList() — see state.mjs.
+  assert.deepEqual(state.cameraTargets, ["CAM1"]);
   httpServer.close();
 });
 
