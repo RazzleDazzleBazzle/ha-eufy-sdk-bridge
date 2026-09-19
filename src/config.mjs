@@ -136,6 +136,13 @@ export function loadConfig(env = process.env) {
     // picture, or (last resort) this bridge's own persisted "Last event" cover — never a fresh capture.
     // Independent of snapshotWarmDevices: works whether or not the periodic sweep is even enabled.
     snapshotNoLiveDevices: snList(env.SNAPSHOT_NO_LIVE_DEVICES),
+    // How many CONSECUTIVE failed live-pull attempts (not the piggyback/no-live/already-streaming
+    // skips — see snapshot-warmup.mjs) before broadcasting snapshotWarmupDegraded, so a real user can
+    // build an HA automation/notification on it instead of only finding out by reading bridge logs.
+    // 3 (~1.5h at the default 30-min sweep) — long enough that one ordinary transient blip (confirmed
+    // to happen on its own, self-recovering, harmless) never fires it, short of the many-hours-long
+    // sustained failure that actually burns real battery.
+    snapshotWarmupAlertThreshold: Number(env.SNAPSHOT_WARMUP_ALERT_THRESHOLD || 3),
   };
 
   const DEBUG = truthy(env.BRIDGE_DEBUG);

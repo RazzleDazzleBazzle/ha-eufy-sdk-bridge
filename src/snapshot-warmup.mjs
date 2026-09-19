@@ -17,6 +17,7 @@ export function createSnapshotWarmup(ctx) {
   const { snapshotCache, activeStreams } = ctx.state;
 
   let sweeping = false; // re-entrancy guard: a slow sweep must not overlap the next interval tick
+  const consecutiveFailures = new Map(); // sn -> count of consecutive failed LIVE PULL attempts only
 
   /**
    * Adopt warmup.mjs's persisted last-event-<sn>.jpg if it's newer than our own last capture.
@@ -41,6 +42,34 @@ export function createSnapshotWarmup(ctx) {
     }
   }
 
+  /**
+   * A live pull just succeeded or failed — track the CONSECUTIVE streak (piggyback/no-live/already-
+   * streaming skips never call this at all, so they neither build nor clear a streak) and broadcast
+   * once crossing cfg.snapshotWarmupAlertThreshold, so a real, sustained problem (confirmed on real
+   * hardware: 8+ hours straight, one specific camera, nothing else affected) is something a user can
+   * build an HA automation/notification on instead of only ever finding out by reading bridge logs.
+   * Also broadcasts the recovery, so an alert this fired for doesn't stay looking "still broken"
+   * forever once it clears on its own.
+   */
+  function recordLiveAttempt(sn, ok, error) {
+    const was = consecutiveFailures.get(sn) ?? 0;
+    if (ok) {
+      consecutiveFailures.delete(sn);
+      if (was >= cfg.snapshotWarmupAlertThreshold)
+        ctx.broadcast?.({ event: "snapshotWarmupRecovered", sn, afterFailures: was });
+      return;
+    }
+    const now = was + 1;
+    consecutiveFailures.set(sn, now);
+    if (now === cfg.snapshotWarmupAlertThreshold)
+      ctx.broadcast?.({
+        event: "snapshotWarmupDegraded",
+        sn,
+        consecutiveFailures: now,
+        error: String(error?.message ?? error),
+      });
+  }
+
   /** Refresh one camera's cached snapshot — piggyback first, a live P2P pull only if that didn't land. */
   async function warmOne(sn) {
     if (await adoptEventImageIfFresher(sn)) return;
@@ -54,9 +83,13 @@ export function createSnapshotWarmup(ctx) {
       const cam = (await eufy.getDevice(sn)).camera?.();
       if (!cam?.snapshotLive) return;
       const { jpeg } = await cam.snapshotLive();
-      if (jpeg?.length) snapshotCache.set(sn, { jpeg, capturedAt: Date.now() });
+      if (jpeg?.length) {
+        snapshotCache.set(sn, { jpeg, capturedAt: Date.now() });
+        recordLiveAttempt(sn, true);
+      }
     } catch (e) {
       ctx.eventLog?.(`snapshot warm-up: ${sn} failed (${e?.message ?? e})`);
+      recordLiveAttempt(sn, false, e);
     }
   }
 
