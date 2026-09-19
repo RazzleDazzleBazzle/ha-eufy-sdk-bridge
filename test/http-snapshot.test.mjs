@@ -35,7 +35,7 @@ function buildCtx({ snapshotLive, snapshotStored, overrides = {}, eventImageDir 
   return { ctx, state };
 }
 
-async function get(handler, sn) {
+async function get(handler, sn, query = "") {
   const res = new PassThrough();
   const chunks = [];
   res.on("data", (c) => chunks.push(c));
@@ -45,7 +45,7 @@ async function get(handler, sn) {
     status = code;
     headers = h;
   };
-  await handler({ url: `/snapshot/${sn}`, headers: { host: "localhost" }, on() {} }, res);
+  await handler({ url: `/snapshot/${sn}${query}`, headers: { host: "localhost" }, on() {} }, res);
   return { status, headers, body: () => Buffer.concat(chunks) };
 }
 
@@ -60,6 +60,36 @@ test("serves the warm-up cache instantly, never touching the SDK", async () => {
   const { status, body } = await get(createHttpHandler(ctx), "CAM1");
   assert.equal(status, 200);
   assert.deepEqual(body(), Buffer.from("cached"));
+});
+
+test("?force=true skips an existing cache and pulls live instead", async () => {
+  const { ctx, state } = buildCtx({ snapshotLive: async () => ({ jpeg: Buffer.from("fresh-live") }) });
+  state.snapshotCache.set("CAM1", { jpeg: Buffer.from("stale-cached"), capturedAt: Date.now() });
+
+  const { status, body } = await get(createHttpHandler(ctx), "CAM1", "?force=true");
+  assert.equal(status, 200);
+  assert.deepEqual(body(), Buffer.from("fresh-live"));
+});
+
+test("a successful ?force=true pull repopulates the cache same as any other live win", async () => {
+  const { ctx, state } = buildCtx({ snapshotLive: async () => ({ jpeg: Buffer.from("fresh-live") }) });
+  state.snapshotCache.set("CAM1", { jpeg: Buffer.from("stale-cached"), capturedAt: Date.now() });
+
+  await get(createHttpHandler(ctx), "CAM1", "?force=true");
+  assert.deepEqual(state.snapshotCache.get("CAM1")?.jpeg, Buffer.from("fresh-live"));
+});
+
+test("?force=true does NOT bypass SNAPSHOT_NO_LIVE_DEVICES — that's a do-not-pay-for-live setting, not a cache knob", async () => {
+  const { ctx } = buildCtx({
+    snapshotLive: async () => {
+      throw new Error("should not be called — SNAPSHOT_NO_LIVE_DEVICES must still apply under force");
+    },
+    snapshotStored: async () => Buffer.from("retained"),
+    overrides: { SNAPSHOT_NO_LIVE_DEVICES: "CAM1" },
+  });
+  const { status, body } = await get(createHttpHandler(ctx), "CAM1", "?force=true");
+  assert.equal(status, 200);
+  assert.deepEqual(body(), Buffer.from("retained"));
 });
 
 test("falls back to a live pull when the cache is empty (feature off, or not warmed yet)", async () => {

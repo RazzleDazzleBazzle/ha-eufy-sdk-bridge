@@ -166,10 +166,17 @@ export function createHttpHandler(ctx) {
     // A current still: a fresh live burst, falling back to the retained push thumbnail.
     if (kind === "snapshot" && sn) {
       const t0 = Date.now();
+      // `?force=true` skips reading the cache below for THIS request only — never clears or writes
+      // over it — so a diagnostic check ("is a live pull actually working for this camera right now,
+      // the same way the periodic sweep does it") can't leave the cache empty for anyone else, and a
+      // successful forced pull still repopulates it same as any other live win. Does NOT override
+      // snapshotNoLiveDevices below — that's a deliberate per-camera do-not-pay-for-live-P2P setting,
+      // not a cache freshness knob, so forcing a live check must not bypass it.
+      const force = url.searchParams.get("force") === "true";
       // Warmed by snapshot-warmup.mjs's own schedule (when SNAPSHOT_WARM_INTERVAL_MIN is set) — serve it
       // instantly instead of paying for a live P2P pull on every request. Empty until that feature is
       // enabled AND has run at least once, so this never changes behaviour for anyone not opting in.
-      const cached = snapshotCache.get(sn);
+      const cached = force ? undefined : snapshotCache.get(sn);
       if (cached) {
         ctx.eventLog(`/snapshot ${sn} → 200 warm cache (${cached.jpeg.length}B)`);
         res.writeHead(200, { "content-type": "image/jpeg", "content-length": cached.jpeg.length });
