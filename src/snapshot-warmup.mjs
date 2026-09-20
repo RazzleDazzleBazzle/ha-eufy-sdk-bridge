@@ -43,13 +43,33 @@ export function createSnapshotWarmup(ctx) {
   }
 
   /**
+   * Crossing the alert threshold means every natural retry the sweep itself already made (one per
+   * 30-minute cycle) has failed identically — confirmed on real hardware (2026-09-20) to persist for
+   * 4+ hours across an ENTIRE station (every camera behind one HomeBase, not just one), while a fresh
+   * dedicated session (the SDK's own live-view path) worked immediately. That's the signature of a
+   * stuck shared session, not a busy or genuinely offline one, so eufy-sdk v0.1.14+'s
+   * resetStationSession is worth trying here — it's safe even if this diagnosis is wrong: it defers to
+   * SessionManager's own "not while retained" rule, so it can't drop a real viewer, and if the station
+   * turns out to be genuinely offline the reset is simply a no-op that changes nothing.
+   */
+  async function tryAutoReset(sn) {
+    try {
+      await eufy.resetStationSession?.(sn);
+      ctx.eventLog?.(`snapshot warm-up: ${sn} — attempted a session reset after sustained failures`);
+    } catch (e) {
+      ctx.eventLog?.(`snapshot warm-up: ${sn} — session reset attempt failed (${e?.message ?? e})`);
+    }
+  }
+
+  /**
    * A live pull just succeeded or failed — track the CONSECUTIVE streak (piggyback/no-live/already-
    * streaming skips never call this at all, so they neither build nor clear a streak) and broadcast
    * once crossing cfg.snapshotWarmupAlertThreshold, so a real, sustained problem (confirmed on real
    * hardware: 8+ hours straight, one specific camera, nothing else affected) is something a user can
    * build an HA automation/notification on instead of only ever finding out by reading bridge logs.
    * Also broadcasts the recovery, so an alert this fired for doesn't stay looking "still broken"
-   * forever once it clears on its own.
+   * forever once it clears on its own. The SAME crossing also triggers one auto-reset attempt (see
+   * tryAutoReset) — once per episode, not on every failure past the threshold.
    */
   function recordLiveAttempt(sn, ok, error) {
     const was = consecutiveFailures.get(sn) ?? 0;
@@ -61,13 +81,15 @@ export function createSnapshotWarmup(ctx) {
     }
     const now = was + 1;
     consecutiveFailures.set(sn, now);
-    if (now === cfg.snapshotWarmupAlertThreshold)
+    if (now === cfg.snapshotWarmupAlertThreshold) {
       ctx.broadcast?.({
         event: "snapshotWarmupDegraded",
         sn,
         consecutiveFailures: now,
         error: String(error?.message ?? error),
       });
+      void tryAutoReset(sn);
+    }
   }
 
   /** Refresh one camera's cached snapshot — piggyback first, a live P2P pull only if that didn't land. */
