@@ -1,6 +1,10 @@
 // Periodic /snapshot cache: a staggered sweep across every camera, piggybacking on a fresher
 // "Last event" image when one exists, skipping a camera someone's actively streaming, and otherwise
 // falling back to a live P2P pull — see src/snapshot-warmup.mjs for the full rationale.
+//
+// Failure-streak/alert/auto-reset behaviour lives in live-pull-health.mjs now (shared with a direct
+// /snapshot request) and is tested there — this file only checks that a live pull's outcome is reported
+// to ctx.recordLiveAttempt correctly, not the tracking logic itself.
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -25,7 +29,6 @@ async function buildCtx({
   overrides = {},
   liveJpegFor = (sn) => jpeg(sn),
   snapshotLiveImpl,
-  resetStationSession,
 } = {}) {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-warmup-"));
   const config = loadConfig({
@@ -39,14 +42,13 @@ async function buildCtx({
   // devices.list poll) — the sweep now reads this instead of fetching its own fresh list.
   state.cameraTargets = devices.filter((d) => d.stream).map((d) => d.sn);
   const liveCalls = [];
-  const broadcasts = [];
-  const resetCalls = [];
+  const liveAttempts = []; // [sn, ok, error] as reported to ctx.recordLiveAttempt
   const ctx = {
     ...config,
     eventImageDir: tmpDir,
     state,
     eventLog() {},
-    broadcast: (evt) => broadcasts.push(evt),
+    recordLiveAttempt: (sn, ok, error) => liveAttempts.push([sn, ok, error]),
     eufy: {
       getDevice: async (sn) => ({
         camera: () => ({
@@ -58,14 +60,10 @@ async function buildCtx({
             }),
         }),
       }),
-      resetStationSession: async (sn) => {
-        resetCalls.push(sn);
-        return resetStationSession?.(sn);
-      },
     },
   };
   Object.assign(ctx, createSnapshotWarmup(ctx));
-  return { ctx, state, liveCalls, broadcasts, resetCalls, tmpDir };
+  return { ctx, state, liveCalls, liveAttempts, tmpDir };
 }
 
 test("does nothing when the feature is off (no interval configured)", async () => {
@@ -159,115 +157,37 @@ test("does NOT re-adopt the same last-event image on every sweep, and re-warms l
   assert.deepEqual(state.snapshotCache.get("CAM1").jpeg, jpeg("CAM1"), "live result wins over the stale file");
 });
 
-test("broadcasts snapshotWarmupDegraded and attempts one session reset only once the failure streak reaches the alert threshold", async () => {
-  const { ctx, broadcasts, resetCalls } = await buildCtx({
+test("reports a successful live pull to recordLiveAttempt", async () => {
+  const { ctx, liveAttempts } = await buildCtx({
     devices: [CAM1],
-    overrides: { SNAPSHOT_WARM_INTERVAL_MIN: "30", SNAPSHOT_WARMUP_ALERT_THRESHOLD: "3" },
-    snapshotLiveImpl: async () => {
-      throw new Error("boom");
-    },
+    overrides: { SNAPSHOT_WARM_INTERVAL_MIN: "30" },
   });
-  const settle = () => new Promise((r) => setImmediate(r)); // let the fire-and-forget reset attempt run
-
   await ctx.snapshotWarmupTick();
-  await settle();
-  assert.equal(broadcasts.length, 0, "1st failure — below threshold");
-  assert.equal(resetCalls.length, 0);
-  await ctx.snapshotWarmupTick();
-  await settle();
-  assert.equal(broadcasts.length, 0, "2nd failure — still below threshold");
-  assert.equal(resetCalls.length, 0);
-  await ctx.snapshotWarmupTick();
-  await settle();
-  assert.equal(broadcasts.length, 1, "3rd failure — crosses the threshold");
-  assert.deepEqual(broadcasts[0], {
-    event: "snapshotWarmupDegraded",
-    sn: "CAM1",
-    consecutiveFailures: 3,
-    error: "boom",
-  });
-  assert.deepEqual(resetCalls, ["CAM1"], "one reset attempted at the same crossing");
-
-  await ctx.snapshotWarmupTick();
-  await settle();
-  assert.equal(broadcasts.length, 1, "4th failure — already alerted, does not fire again");
-  assert.deepEqual(resetCalls, ["CAM1"], "4th failure — reset already attempted this episode, not repeated");
+  assert.deepEqual(liveAttempts, [["CAM1", true, undefined]]);
 });
 
-test("a session reset failure is logged, not thrown, and does not stop the sweep", async () => {
-  const logs = [];
-  const { ctx } = await buildCtx({
+test("reports a failed live pull to recordLiveAttempt, with the error", async () => {
+  const boom = new Error("boom");
+  const { ctx, liveAttempts } = await buildCtx({
     devices: [CAM1],
-    overrides: { SNAPSHOT_WARM_INTERVAL_MIN: "30", SNAPSHOT_WARMUP_ALERT_THRESHOLD: "1" },
+    overrides: { SNAPSHOT_WARM_INTERVAL_MIN: "30" },
     snapshotLiveImpl: async () => {
-      throw new Error("boom");
-    },
-    resetStationSession: async () => {
-      throw new Error("reset boom");
+      throw boom;
     },
   });
-  ctx.eventLog = (m) => logs.push(m);
-
-  await assert.doesNotReject(ctx.snapshotWarmupTick());
-  await new Promise((r) => setImmediate(r));
-  assert.ok(logs.some((m) => /session reset attempt failed.*reset boom/.test(m)));
+  await ctx.snapshotWarmupTick();
+  assert.deepEqual(liveAttempts, [["CAM1", false, boom]]);
 });
 
-test("broadcasts snapshotWarmupRecovered when a live pull succeeds after crossing the alert threshold", async () => {
-  let shouldFail = true;
-  const { ctx, broadcasts } = await buildCtx({
+test("a piggyback or skipped camera reports no live attempt at all", async (t) => {
+  const { ctx, liveAttempts, tmpDir } = await buildCtx({
     devices: [CAM1],
-    overrides: { SNAPSHOT_WARM_INTERVAL_MIN: "30", SNAPSHOT_WARMUP_ALERT_THRESHOLD: "2" },
-    snapshotLiveImpl: async () => {
-      if (shouldFail) throw new Error("boom");
-      return { jpeg: jpeg("recovered") };
-    },
+    overrides: { SNAPSHOT_WARM_INTERVAL_MIN: "30" },
   });
-
-  await ctx.snapshotWarmupTick();
-  await ctx.snapshotWarmupTick();
-  assert.equal(broadcasts.length, 1, "degraded fired at the threshold");
-
-  shouldFail = false;
-  await ctx.snapshotWarmupTick();
-  assert.equal(broadcasts.length, 2);
-  assert.deepEqual(broadcasts[1], { event: "snapshotWarmupRecovered", sn: "CAM1", afterFailures: 2 });
-});
-
-test("a success before ever reaching the alert threshold does not broadcast a recovery", async () => {
-  let shouldFail = true;
-  const { ctx, broadcasts } = await buildCtx({
-    devices: [CAM1],
-    overrides: { SNAPSHOT_WARM_INTERVAL_MIN: "30", SNAPSHOT_WARMUP_ALERT_THRESHOLD: "3" },
-    snapshotLiveImpl: async () => {
-      if (shouldFail) throw new Error("boom");
-      return { jpeg: jpeg("ok") };
-    },
-  });
-
-  await ctx.snapshotWarmupTick(); // 1 failure, below the threshold of 3
-  shouldFail = false;
-  await ctx.snapshotWarmupTick(); // recovers before ever alerting
-  assert.equal(broadcasts.length, 0);
-});
-
-test("piggyback/no-live/already-streaming skips neither build nor clear a failure streak", async () => {
-  const { ctx, state, broadcasts, tmpDir } = await buildCtx({
-    devices: [CAM1],
-    overrides: { SNAPSHOT_WARM_INTERVAL_MIN: "30", SNAPSHOT_WARMUP_ALERT_THRESHOLD: "1" },
-    snapshotLiveImpl: async () => {
-      throw new Error("boom");
-    },
-  });
-  await ctx.snapshotWarmupTick();
-  assert.equal(broadcasts.length, 1, "alert threshold of 1 fires on the very first failure");
-
-  // A piggyback success on the NEXT tick must not silently count as "recovered" — it never touched
-  // the live-pull path at all, so the streak (and any eventual recovery broadcast) stays meaningful.
   await fs.writeFile(path.join(tmpDir, "last-event-CAM1.jpg"), jpeg("event"));
-  await ctx.snapshotWarmupTick();
-  assert.equal(broadcasts.length, 1, "piggyback landing is not a live-pull recovery");
-  assert.deepEqual(state.snapshotCache.get("CAM1").jpeg, jpeg("event"));
+  t.after(() => fs.rm(tmpDir, { recursive: true, force: true }));
 
-  await fs.rm(tmpDir, { recursive: true, force: true });
+  await ctx.snapshotWarmupTick();
+
+  assert.equal(liveAttempts.length, 0, "piggyback never touched the live-pull path");
 });

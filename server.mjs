@@ -18,6 +18,7 @@ import { createEufy } from "./src/client.mjs";
 import { createFaces } from "./src/faces.mjs";
 import { createDeviceView } from "./src/device-view.mjs";
 import { createWarmup } from "./src/warmup.mjs";
+import { createLivePullHealth } from "./src/live-pull-health.mjs";
 import { createSnapshotWarmup } from "./src/snapshot-warmup.mjs";
 import { createStreamIdle } from "./src/stream-idle.mjs";
 import { createWatchdog } from "./src/watchdog.mjs";
@@ -46,6 +47,12 @@ if (!cfg.email || !cfg.password) {
 const state = createState();
 const eufy = createEufy(config);
 const ctx = { ...config, eufy, state, streamClientFor };
+
+// Assembled separately, and first: createSnapshotWarmup and createHttpHandler both destructure
+// ctx.recordLiveAttempt at FACTORY-call time (not lazily), so it must already be on ctx before either
+// of those run — unlike every other factory below, which only reads its deps off ctx later, at actual
+// request/tick time, by which point the big merge beneath this has long since completed.
+Object.assign(ctx, createLivePullHealth(ctx));
 
 // Each factory reads its cross-module deps off ctx lazily, so this single merge is enough — nothing here
 // is called until login/handlers run, by which point ctx is complete.

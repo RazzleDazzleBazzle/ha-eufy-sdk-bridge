@@ -30,6 +30,7 @@ function buildCtx({ snapshotLive, snapshotStored, overrides = {}, eventImageDir 
     eventLog() {},
     broadcast() {},
     authStatus: () => ({ state: "ok" }),
+    recordLiveAttempt() {}, // failure-streak tracking is live-pull-health.mjs's concern, not this route's
   };
   state.flags.ready = true;
   return { ctx, state };
@@ -97,6 +98,29 @@ test("falls back to a live pull when the cache is empty (feature off, or not war
   const { status, body } = await get(createHttpHandler(ctx), "CAM1");
   assert.equal(status, 200);
   assert.deepEqual(body(), Buffer.from("live"));
+});
+
+test("a genuine live win reports success to recordLiveAttempt — shared with the sweep's own streak", async () => {
+  const attempts = [];
+  const { ctx } = buildCtx({ snapshotLive: async () => ({ jpeg: Buffer.from("live") }) });
+  ctx.recordLiveAttempt = (sn, ok, error) => attempts.push([sn, ok, error]);
+  await get(createHttpHandler(ctx), "CAM1");
+  assert.deepEqual(attempts, [["CAM1", true, undefined]]);
+});
+
+test("a live pull failure reports the error to recordLiveAttempt, even though snapshotStored bails the request out", async () => {
+  const attempts = [];
+  const boom = new Error("camera unreachable");
+  const { ctx } = buildCtx({
+    snapshotLive: async () => {
+      throw boom;
+    },
+    snapshotStored: async () => Buffer.from("stored"),
+  });
+  ctx.recordLiveAttempt = (sn, ok, error) => attempts.push([sn, ok, error]);
+  const { status } = await get(createHttpHandler(ctx), "CAM1");
+  assert.equal(status, 200, "the request itself still succeeds via the stored fallback");
+  assert.deepEqual(attempts, [["CAM1", false, boom]]);
 });
 
 test("a genuine live win populates the warm cache, so a later loser gets it instead of an old Last-event file", async () => {

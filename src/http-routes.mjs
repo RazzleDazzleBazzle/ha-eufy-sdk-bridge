@@ -29,6 +29,9 @@ export function createHttpHandler(ctx) {
     snapshotCache,
   } = ctx.state;
   const { grabFrameToCache } = createGo2rtcFrame(cfg, { eventLog: ctx.eventLog, fetchImpl: ctx.fetchImpl });
+  // Shared with the periodic sweep (see snapshot-warmup.mjs) — a real, usage-driven live-pull failure
+  // (or success) here counts toward the SAME streak the sweep's own attempts do. See live-pull-health.mjs.
+  const { recordLiveAttempt } = ctx;
 
   // Actually tear a feed down: stop the P2P pull for real and, if it had been reported as streaming,
   // broadcast the "off" edge. Idempotent — safe to call from either lifecycle path (a consumer that
@@ -217,8 +220,10 @@ export function createHttpHandler(ctx) {
         let jpeg, retained;
         try {
           ({ jpeg, retained } = await cam.snapshotLive());
+          recordLiveAttempt(sn, true);
         } catch (liveError) {
           ctx.eventLog(`/snapshot ${sn} → live failed (${Date.now() - t0}ms): ${liveError?.message ?? liveError}`);
+          recordLiveAttempt(sn, false, liveError);
           jpeg = await cam.snapshotStored?.().catch(() => undefined);
         }
         if (jpeg) {
