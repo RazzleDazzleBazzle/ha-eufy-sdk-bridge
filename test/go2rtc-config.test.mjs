@@ -25,6 +25,19 @@ test("go2rtcSourceUrl falls back to 15fps when streamFps is unset", () => {
   assert.match(go2rtcSourceUrl(cfg, "CAM1"), /-r 15 -i/);
 });
 
+test("go2rtcSourceUrl uses video=copy#async for a serial listed in go2rtcCopyAsyncDevices", () => {
+  const cfg = { selfHost: "127.0.0.1", port: 3000, streamFps: 15, go2rtcCopyAsyncDevices: new Set(["CAM1"]) };
+  assert.equal(
+    go2rtcSourceUrl(cfg, "CAM1"),
+    "ffmpeg:http://127.0.0.1:3000/stream/CAM1#video=copy#async#input=-r 15 -i http://127.0.0.1:3000/stream/CAM1",
+  );
+});
+
+test("go2rtcSourceUrl leaves an unlisted serial on the default video=h264, even with the trial set configured", () => {
+  const cfg = { selfHost: "127.0.0.1", port: 3000, streamFps: 15, go2rtcCopyAsyncDevices: new Set(["CAM1"]) };
+  assert.match(go2rtcSourceUrl(cfg, "CAM2"), /#video=h264#/);
+});
+
 test("writeGo2rtcConfig writes the api port from cfg and one stream line per camera, skipping non-cameras", async (t) => {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "go2rtc-config-"));
   const go2rtcConfig = path.join(tmpDir, "go2rtc.yaml");

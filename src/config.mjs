@@ -143,6 +143,13 @@ export function loadConfig(env = process.env) {
     // to happen on its own, self-recovering, harmless) never fires it, short of the many-hours-long
     // sustained failure that actually burns real battery.
     snapshotWarmupAlertThreshold: Number(env.SNAPSHOT_WARMUP_ALERT_THRESHOLD || 3),
+    // EXPERIMENTAL, per-device opt-in trial (see go2rtc-config.mjs for the full reasoning): swap a
+    // camera's go2rtc source from this project's default `video=h264` full transcode to a cheap
+    // `video=copy#async` stream-copy + wall-clock re-stamp instead — the fix the community
+    // mega-yfue/ha-eufy-sdk-bridge fork found (PR #64) for the same untimed-raw-feed problem, using a
+    // go2rtc-native flag (`internal/ffmpeg/ffmpeg.go`: `-use_wallclock_as_timestamps 1 -async 1`), not a
+    // fork of go2rtc itself. Unset by default — nothing changes for a camera not named here.
+    go2rtcCopyAsyncDevices: snList(env.GO2RTC_COPY_ASYNC_DEVICES),
   };
 
   const DEBUG = truthy(env.BRIDGE_DEBUG);

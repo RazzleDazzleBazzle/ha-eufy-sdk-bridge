@@ -36,11 +36,19 @@ const isCamera = (d) => Boolean(d.stream);
  * Shared with go2rtc-recover.mjs, which has to rebuild this identically when re-PUTting a stream
  * that go2rtc's own exec-producer race (see that file) left stuck — any drift between the two
  * would mean a "recovered" stream comes back with different transcode params than every other one.
+ *
+ * A serial listed in cfg.go2rtcCopyAsyncDevices gets `video=copy#async` instead of this project's
+ * default `video=h264` full transcode — an EXPERIMENTAL per-device trial of the community fork's
+ * PR #64 fix (see config.mjs): a stream-copy re-stamped by go2rtc's own `-use_wallclock_as_timestamps
+ * 1 -async 1` (native go2rtc, `internal/ffmpeg/ffmpeg.go`) costs none of the transcode's CPU, IF it
+ * turns out to produce clean output on this project's actual camera feeds — not yet confirmed on real
+ * hardware here, which is exactly why this is opt-in rather than the new default.
  */
 export function go2rtcSourceUrl(cfg, sn) {
   const fps = cfg.streamFps || 15;
   const src = `http://${cfg.selfHost}:${cfg.port}/stream/${sn}`;
-  return `ffmpeg:${src}#video=h264#input=-r ${fps} -i ${src}`;
+  const video = cfg.go2rtcCopyAsyncDevices?.has(sn) ? "copy#async" : "h264";
+  return `ffmpeg:${src}#video=${video}#input=-r ${fps} -i ${src}`;
 }
 
 export async function writeGo2rtcConfig(cfg, devices) {
