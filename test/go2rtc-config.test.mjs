@@ -12,24 +12,22 @@ import { writeGo2rtcConfig, go2rtcSourceUrl } from "../go2rtc-config.mjs";
 const CAM = { sn: "CAM1", stream: "/stream/CAM1" };
 const NOT_A_CAM = { sn: "SENSOR1", stream: undefined };
 
-test("go2rtcSourceUrl builds the ffmpeg source string from selfHost/port/streamFps", () => {
+test("go2rtcSourceUrl builds the ffmpeg source string, referencing the named input template (no inline fps/spaces)", () => {
   const cfg = { selfHost: "127.0.0.1", port: 3000, streamFps: 15 };
-  assert.equal(
-    go2rtcSourceUrl(cfg, "CAM1"),
-    "ffmpeg:http://127.0.0.1:3000/stream/CAM1#video=h264#input=-r 15 -i http://127.0.0.1:3000/stream/CAM1",
-  );
+  assert.equal(go2rtcSourceUrl(cfg, "CAM1"), "ffmpeg:http://127.0.0.1:3000/stream/CAM1#video=h264#input=bridge_input");
 });
 
-test("go2rtcSourceUrl falls back to 15fps when streamFps is unset", () => {
-  const cfg = { selfHost: "127.0.0.1", port: 3000 };
-  assert.match(go2rtcSourceUrl(cfg, "CAM1"), /-r 15 -i/);
+test("go2rtcSourceUrl never contains a space — go2rtc's runtime API rejects any source that does", () => {
+  const cfg = { selfHost: "127.0.0.1", port: 3000, streamFps: 15, go2rtcCopyAsyncDevices: new Set(["CAM1"]) };
+  assert.doesNotMatch(go2rtcSourceUrl(cfg, "CAM1"), /\s/);
+  assert.doesNotMatch(go2rtcSourceUrl(cfg, "CAM2"), /\s/);
 });
 
 test("go2rtcSourceUrl uses video=copy#async for a serial listed in go2rtcCopyAsyncDevices", () => {
   const cfg = { selfHost: "127.0.0.1", port: 3000, streamFps: 15, go2rtcCopyAsyncDevices: new Set(["CAM1"]) };
   assert.equal(
     go2rtcSourceUrl(cfg, "CAM1"),
-    "ffmpeg:http://127.0.0.1:3000/stream/CAM1#video=copy#async#input=-r 15 -i http://127.0.0.1:3000/stream/CAM1",
+    "ffmpeg:http://127.0.0.1:3000/stream/CAM1#video=copy#async#input=bridge_input",
   );
 });
 
@@ -63,4 +61,28 @@ test("writeGo2rtcConfig honours a custom go2rtcApiPort", async (t) => {
 
   const yaml = await fs.readFile(go2rtcConfig, "utf8");
   assert.match(yaml, /api:\n {2}listen: ":1985"/);
+});
+
+test("writeGo2rtcConfig writes the named ffmpeg input template with the configured fps", async (t) => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "go2rtc-config-"));
+  const go2rtcConfig = path.join(tmpDir, "go2rtc.yaml");
+  t.after(() => fs.rm(tmpDir, { recursive: true, force: true }));
+
+  const cfg = { selfHost: "127.0.0.1", port: 3000, streamFps: 20, go2rtcApiPort: 1984, go2rtcConfig };
+  await writeGo2rtcConfig(cfg, [CAM]);
+
+  const yaml = await fs.readFile(go2rtcConfig, "utf8");
+  assert.match(yaml, /ffmpeg:\n {2}bridge_input: "-r 20 -i \{input\}"/);
+});
+
+test("writeGo2rtcConfig's ffmpeg input template falls back to 15fps when streamFps is unset", async (t) => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "go2rtc-config-"));
+  const go2rtcConfig = path.join(tmpDir, "go2rtc.yaml");
+  t.after(() => fs.rm(tmpDir, { recursive: true, force: true }));
+
+  const cfg = { selfHost: "127.0.0.1", port: 3000, go2rtcApiPort: 1984, go2rtcConfig };
+  await writeGo2rtcConfig(cfg, [CAM]);
+
+  const yaml = await fs.readFile(go2rtcConfig, "utf8");
+  assert.match(yaml, /bridge_input: "-r 15 -i \{input\}"/);
 });

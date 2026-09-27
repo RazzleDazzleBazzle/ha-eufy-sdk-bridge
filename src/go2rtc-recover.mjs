@@ -48,7 +48,17 @@ const RECREATE_DELAY_MS = 500;
 // until another consumer happened to hit the SAME dead end and re-trigger this whole module (or,
 // short of that, forever — confirmed: Side Door sat 404ing for every HomeKit attempt for 10+ hours
 // after both of one night's two independent trigger events failed their one and only attempt each).
-// These retries are the fix: several tries per trigger, not relying on a future trigger to exist.
+// These retries are the fix for THAT race — several tries per trigger, not relying on a future
+// trigger to exist.
+//
+// A SECOND, fully deterministic cause of the exact same "PUT → 400, empty body" symptom was found
+// later (2026-09-27, see go2rtc-config.mjs's module header): go2rtc's runtime API `Validate()`s any
+// `src` and unconditionally rejects one containing a space, which this module's PUT always did before
+// go2rtc-config.mjs moved the `-r <fps> -i {input}` override into a named ffmpeg template — that
+// version could never succeed no matter how many retries ran, since every attempt resent the identical
+// space-containing string. Likely the real explanation for at least some of what the race theory above
+// was blamed for. Fixed at the source (the string this module rebuilds is space-free now); these
+// retries stay because the original race is real and separate.
 const RETRY_DELAYS_MS = [500, 1_500, 3_000];
 
 export function createGo2rtcRecovery(cfg, { eventLog, fetchImpl = fetch, delay = defaultDelay } = {}) {
