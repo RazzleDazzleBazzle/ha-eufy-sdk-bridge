@@ -220,7 +220,17 @@ export function createHttpHandler(ctx) {
         let jpeg, retained;
         try {
           ({ jpeg, retained } = await cam.snapshotLive());
-          recordLiveAttempt(sn, true);
+          // `retained` means the SDK's OWN live pull didn't actually succeed — it's serving back
+          // whatever stale frame it already had cached internally (confirmed on real hardware,
+          // 2026-09-28: a "successful" retained result served a two-week-old frame). That's not a
+          // thrown error, but it's not a genuine live win either, so it must count the same way a
+          // thrown failure does — otherwise a camera that's quietly stuck serving an old retained
+          // frame forever never crosses the alert threshold, because nothing ever "fails".
+          recordLiveAttempt(
+            sn,
+            !retained,
+            retained ? "retained (SDK fallback, not a genuine live capture)" : undefined,
+          );
         } catch (liveError) {
           ctx.eventLog(`/snapshot ${sn} → live failed (${Date.now() - t0}ms): ${liveError?.message ?? liveError}`);
           recordLiveAttempt(sn, false, liveError);

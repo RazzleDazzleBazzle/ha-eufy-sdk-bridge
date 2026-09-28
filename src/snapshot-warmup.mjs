@@ -56,10 +56,16 @@ export function createSnapshotWarmup(ctx) {
     try {
       const cam = (await eufy.getDevice(sn)).camera?.();
       if (!cam?.snapshotLive) return;
-      const { jpeg } = await cam.snapshotLive();
+      const { jpeg, retained } = await cam.snapshotLive();
       if (jpeg?.length) {
-        snapshotCache.set(sn, { jpeg, capturedAt: Date.now() });
-        recordLiveAttempt(sn, true);
+        // A `retained` result is the SDK's OWN stale fallback, not a genuine live capture (confirmed on
+        // real hardware, 2026-09-28: a "successful" retained result served a two-week-old frame).
+        // Caching it here would stamp that stale image with a FRESH capturedAt, hiding real staleness
+        // from anyone reading this cache — leave whatever's already there alone instead, and count this
+        // the same way a thrown failure counts, so a camera quietly stuck on retained forever still
+        // crosses the alert threshold (nothing ever throws, so it otherwise never would).
+        if (!retained) snapshotCache.set(sn, { jpeg, capturedAt: Date.now() });
+        recordLiveAttempt(sn, !retained, retained ? "retained (SDK fallback, not a genuine live capture)" : undefined);
       }
     } catch (e) {
       ctx.eventLog?.(`snapshot warm-up: ${sn} failed (${e?.message ?? e})`);

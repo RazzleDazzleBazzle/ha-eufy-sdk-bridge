@@ -191,3 +191,23 @@ test("a piggyback or skipped camera reports no live attempt at all", async (t) =
 
   assert.equal(liveAttempts.length, 0, "piggyback never touched the live-pull path");
 });
+
+test("a retained (SDK fallback) live result is NOT cached as fresh, and counts as a failed attempt", async () => {
+  const { ctx, state, liveAttempts } = await buildCtx({
+    devices: [CAM1],
+    overrides: { SNAPSHOT_WARM_INTERVAL_MIN: "30" },
+    snapshotLiveImpl: async () => ({ jpeg: jpeg("stale-retained"), retained: true }),
+  });
+  state.snapshotCache.set("CAM1", { jpeg: jpeg("already-fresher"), capturedAt: Date.now() });
+
+  await ctx.snapshotWarmupTick();
+
+  assert.deepEqual(
+    state.snapshotCache.get("CAM1").jpeg,
+    jpeg("already-fresher"),
+    "a retained result must not overwrite whatever was already cached",
+  );
+  assert.equal(liveAttempts.length, 1);
+  assert.equal(liveAttempts[0][0], "CAM1");
+  assert.equal(liveAttempts[0][1], false, "retained counts as a failed attempt, not a success");
+});

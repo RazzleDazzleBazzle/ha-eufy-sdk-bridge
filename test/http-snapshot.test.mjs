@@ -157,6 +157,19 @@ test("does NOT cache the SDK's own retained fallback as if it were a fresh live 
   assert.equal(state.snapshotCache.has("CAM1"), false);
 });
 
+test("a retained (SDK fallback) result reports as a FAILED attempt to recordLiveAttempt, not a success", async () => {
+  const attempts = [];
+  const { ctx } = buildCtx({
+    snapshotLive: async () => ({ jpeg: Buffer.from("retained-bytes"), retained: true }),
+  });
+  ctx.recordLiveAttempt = (sn, ok, error) => attempts.push([sn, ok, error]);
+  const { status } = await get(createHttpHandler(ctx), "CAM1");
+  assert.equal(status, 200, "still serves the retained image — just doesn't count it as a healthy live pull");
+  assert.equal(attempts.length, 1);
+  assert.equal(attempts[0][0], "CAM1");
+  assert.equal(attempts[0][1], false);
+});
+
 test("falls back to the stored snapshot when a live pull fails and nothing is cached", async () => {
   const { ctx } = buildCtx({
     snapshotLive: async () => {
