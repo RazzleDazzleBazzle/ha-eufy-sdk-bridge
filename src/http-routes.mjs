@@ -40,9 +40,17 @@ export function createHttpHandler(ctx) {
     const pending = pendingTeardown.get(sn);
     if (pending) clearTimeout(pending.timer);
     pendingTeardown.delete(sn);
+    const entry = activeStreams.get(sn);
     activeStreams.delete(sn);
     feed.destroy();
     if (streaming.delete(sn)) ctx.broadcast({ event: "streamState", deviceSn: sn, active: false });
+    // A feed that dies abnormally (P2P drop, warm-up timeout) rather than ending cleanly doesn't take
+    // its piped responses down with it: pipe() only ends a destination on the SOURCE's clean 'end', so
+    // each attached consumer would otherwise sit on an open, silent socket until ITS OWN client (e.g.
+    // go2rtc's ffmpeg) times out and reconnects late. entry is only set here (not already emptied by
+    // scheduleTeardown's own grace-period path, which has none left to end) when this fires on a feed
+    // that still had active consumers — abort each of them now instead of waiting that out.
+    if (entry) for (const res of entry.consumers) if (!res.writableEnded) res.destroy();
   }
 
   // The LAST consumer went away, but the P2P feed itself is still healthy — keep it open and drained
@@ -335,11 +343,32 @@ export function createHttpHandler(ctx) {
           error: "stream idle-suspended — no recent detection, waiting for motion or a fresh viewer",
         });
       const t0 = Date.now();
+      // The viewer can leave while openFeedFor is still mid-handshake — a real window, not a theoretical
+      // one: a cold P2P start commonly takes 10-25s (see cfg.streamReconnectGraceMs's own comment), well
+      // past HA's RTSP client's hard-coded 5s read timeout, so its first attempt routinely gives up and
+      // retries before this resolves. Watched from here (not inside attachConsumer) because req's own
+      // "close" only fires ONCE — attaching the listener after the fact, as attachConsumer normally does,
+      // would silently miss an event that already happened, registering a consumer that is already gone
+      // and will never be noticed leaving: a phantom hold on the feed with no reconnect to end it.
+      let clientGone = false;
+      const onClientGone = () => (clientGone = true);
+      req.once("close", onClientGone);
       try {
         const feed = await openFeedFor(sn);
+        req.removeListener("close", onClientGone);
+        if (clientGone) {
+          // Don't attach a consumer that's already gone. If nobody else is watching this feed either,
+          // let it drain through the normal "last consumer left" path — same as a real viewer connecting
+          // and immediately disconnecting, including the reconnect grace window in case this is itself
+          // the first half of exactly the retry this comment describes.
+          const entry = activeStreams.get(sn);
+          if (!entry || entry.consumers.size === 0) scheduleTeardown(sn, feed);
+          return;
+        }
         attachConsumer(sn, feed, req, res);
         return;
       } catch (e) {
+        req.removeListener("close", onClientGone);
         if (e instanceof NoLiveVideoError) return json(res, 404, { error: e.message });
         ctx.eventLog(`/stream ${sn} → 502 FAILED (${Date.now() - t0}ms): ${e?.message ?? e}`);
         return json(res, 502, { error: String(e?.message ?? e) });
