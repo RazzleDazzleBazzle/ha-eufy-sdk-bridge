@@ -277,12 +277,51 @@ export function createWarmup(ctx) {
     });
   }
 
+  /** Fetch one station device's cover and persist it; logs + returns whether it actually changed. */
+  async function persistCover(session, accountId, dsn, entry, recordCount, viaSn) {
+    const filePath = entry.path;
+    const crop = filePath.split("/").pop();
+    const data = await fetchImage(session, filePath, accountId);
+    if (!data) {
+      ctx.eventLog?.(`local refresh: ${dsn} — cover fetch returned no image (crop=${crop})`);
+      return false;
+    }
+    if (persistIfChanged(dsn, data)) {
+      ctx.eventLog?.(
+        `local refresh: ${dsn} → last-event image updated (${data.length}B, local) ` +
+          `[ts=${entry.ts} crop=${crop} of ${recordCount} recs]` +
+          (viaSn !== dsn ? ` [triggered by ${viaSn} — linked sensor on the same station]` : ""),
+      );
+      return true;
+    }
+    ctx.eventLog?.(
+      `local refresh: ${dsn} — cover unchanged (${data.length}B) [ts=${entry.ts} crop=${crop} of ${recordCount} recs]`,
+    );
+    // One-shot structure dump on the failing path: the picked record's field names + a truncated
+    // JSON, so we can find the REAL per-event crop-path field and timestamp (crop_hb3_path here is a
+    // generic rolling "snapshort.jpg" and start_time reads 0). Trimmed to keep the log sane.
+    try {
+      const rec = entry.rec ?? {};
+      const keys = Object.keys(rec).join(",");
+      const pkeys = Object.keys(rec.payload ?? {}).join(",");
+      ctx.eventLog?.(`local refresh: ${dsn} — record keys=[${keys}] payload=[${pkeys}]`);
+      ctx.eventLog?.(`local refresh: ${dsn} — record sample=${JSON.stringify(rec).slice(0, 700)}`);
+    } catch {
+      /* best-effort diagnostic */
+    }
+    return false;
+  }
+
   /**
    * Pull the freshest local cover for ONE device from HomeBase storage and persist it to
    * last-event-<sn>.jpg. This is what actually advances "Last event" on a local-storage account: the SDK's
    * push-thumbnail cache (`camera.snapshotStored()`) stays empty because such accounts' pushes carry no
-   * cloud `pic_url`, so /event-image would otherwise serve the boot-warmed image forever. Returns true when
-   * the bytes changed (so the caller can nudge HA to re-fetch). Serialised against every other DB read.
+   * cloud `pic_url`, so /event-image would otherwise serve the boot-warmed image forever.
+   *
+   * Returns the serial that actually changed — `sn` itself, OR, when `sn` is a non-camera device whose
+   * detection landed on a linked camera instead (see below), that camera's own serial — so the caller
+   * nudges HA about the device whose /event-image genuinely moved, not `sn` unconditionally. `false` when
+   * nothing changed. Serialised against every other DB read.
    */
   function refreshLastEventImageFor(sn) {
     return withDbLock(async () => {
@@ -295,50 +334,41 @@ export function createWarmup(ctx) {
         for (const [, session] of sessions) {
           if (!session.isConnected) continue;
           const { covers, recordCount, seen } = await queryStationCovers(session, accountId);
-          const entry = covers.get(sn);
-          if (!entry) {
-            // Diagnostic: did this station return records for this device at all? If it has a newer record
-            // whose newest ts carries NO crop, that's "HomeBase wrote the event but not (yet) a crop";
-            // if no records mention it, this simply isn't its station.
-            const s = seen?.get(sn);
-            if (s) {
-              ctx.eventLog?.(
-                `local refresh: ${sn} — no crop in its ${s.count} record(s) here ` +
-                  `(newest ts=${s.maxTs}, hasCrop=${s.maxTsHasCrop}; ${recordCount} total)`,
-              );
+          if (covers.has(sn)) {
+            return (await persistCover(session, accountId, sn, covers.get(sn), recordCount, sn)) && sn;
+          }
+          const cameraTargets = ctx.state.cameraTargets ?? [];
+          if (!cameraTargets.includes(sn)) {
+            // `sn` is not itself one of this account's cameras — e.g. a standalone motion/entry sensor
+            // with wider range than its linked camera's own PIR. A detection push is attributed to
+            // whichever device actually sensed it, but the RECORDING still lands on the camera, under the
+            // camera's own device_sn, never the sensor's, so a sensor-sn lookup here always misses.
+            // `covers` already holds every device this station reported a crop for in this ONE query — no
+            // extra P2P cost — so fall back to whichever of this account's known cameras this station just
+            // gave us a cover for. (Gated on `sn` not being a camera itself, so an ordinary camera-sn
+            // detection whose OWN crop simply hasn't landed yet — the common early-retry case this file
+            // already handles below — doesn't start touching every other camera on the station.)
+            const linked = cameraTargets.filter((csn) => csn !== sn && covers.has(csn));
+            if (linked.length) {
+              let changedSn = false;
+              for (const csn of linked) {
+                if (await persistCover(session, accountId, csn, covers.get(csn), recordCount, sn)) changedSn = csn;
+              }
+              if (changedSn) return changedSn;
+              continue; // this station had covers, just none newer than what's already on disk
             }
-            continue; // this device isn't on this station — try the next
           }
-          const filePath = entry.path;
-          const crop = filePath.split("/").pop();
-          const data = await fetchImage(session, filePath, accountId);
-          if (!data) {
-            ctx.eventLog?.(`local refresh: ${sn} — cover fetch returned no image (crop=${crop})`);
-            return false;
-          }
-          if (persistIfChanged(sn, data)) {
+          // Diagnostic: did this station return records for this device at all? If it has a newer record
+          // whose newest ts carries NO crop, that's "HomeBase wrote the event but not (yet) a crop";
+          // if no records mention it, this simply isn't its station.
+          const s = seen?.get(sn);
+          if (s) {
             ctx.eventLog?.(
-              `local refresh: ${sn} → last-event image updated (${data.length}B, local) ` +
-                `[ts=${entry.ts} crop=${crop} of ${recordCount} recs]`,
+              `local refresh: ${sn} — no crop in its ${s.count} record(s) here ` +
+                `(newest ts=${s.maxTs}, hasCrop=${s.maxTsHasCrop}; ${recordCount} total)`,
             );
-            return true;
           }
-          ctx.eventLog?.(
-            `local refresh: ${sn} — cover unchanged (${data.length}B) [ts=${entry.ts} crop=${crop} of ${recordCount} recs]`,
-          );
-          // One-shot structure dump on the failing path: the picked record's field names + a truncated
-          // JSON, so we can find the REAL per-event crop-path field and timestamp (crop_hb3_path here is a
-          // generic rolling "snapshort.jpg" and start_time reads 0). Trimmed to keep the log sane.
-          try {
-            const rec = entry.rec ?? {};
-            const keys = Object.keys(rec).join(",");
-            const pkeys = Object.keys(rec.payload ?? {}).join(",");
-            ctx.eventLog?.(`local refresh: ${sn} — record keys=[${keys}] payload=[${pkeys}]`);
-            ctx.eventLog?.(`local refresh: ${sn} — record sample=${JSON.stringify(rec).slice(0, 700)}`);
-          } catch {
-            /* best-effort diagnostic */
-          }
-          return false;
+          continue; // this device isn't on this station — try the next
         }
         ctx.eventLog?.(`local refresh: ${sn} — no local cover found on any connected station`);
         return false;
@@ -414,8 +444,10 @@ export function createWarmup(ctx) {
           const delay = i < LOCAL_REFRESH_SCHEDULE.length ? LOCAL_REFRESH_SCHEDULE[i] : LOCAL_REFRESH_TAIL_MS;
           await sleep(delay);
           elapsed += delay;
-          if (await refreshLastEventImageFor(sn)) {
-            nudge(sn, true);
+          // The device that actually changed — `sn` itself, or a linked camera when `sn` is a sensor.
+          const changedSn = await refreshLastEventImageFor(sn);
+          if (changedSn) {
+            nudge(changedSn, true);
             return;
           }
         }
@@ -440,8 +472,11 @@ export function createWarmup(ctx) {
       refreshStoredSnapshotFor(sn).catch(() => false),
       refreshLastEventImageFor(sn).catch(() => false),
     ]);
+    // `local` names the device that actually changed — `sn` itself, or a linked camera when `sn` is a
+    // sensor — so a manual refresh on a sensor still nudges the right camera, not the sensor.
+    if (stored) nudge(sn, true);
+    if (local) nudge(local, true);
     const changed = Boolean(stored || local);
-    nudge(sn, changed);
     ctx.eventLog?.(`force refresh: ${sn} → ${changed ? "image updated" : "no newer image available yet"}`);
     return changed;
   }
