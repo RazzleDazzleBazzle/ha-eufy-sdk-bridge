@@ -99,5 +99,5 @@ export function createSnapshotWarmup(ctx) {
     }
   }
 
-  return { snapshotWarmupTick };
+  return { snapshotWarmupTick, adoptEventImageIfFresher };
 }

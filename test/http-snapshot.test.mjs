@@ -258,6 +258,48 @@ test("the default (live) path also falls back to the persisted Last-event file w
   assert.deepEqual(body(), Buffer.from("last-event"));
 });
 
+test("a fresher detection image displaces a stale warm-up cache on THIS request, not just at the next sweep tick", async () => {
+  const { ctx, state } = buildCtx({ overrides: { SNAPSHOT_WARM_INTERVAL_MIN: "30" } });
+  state.snapshotCache.set("CAM1", { jpeg: Buffer.from("stale-sweep-capture"), capturedAt: 1000 });
+  // Stands in for snapshot-warmup.mjs's real adoptEventImageIfFresher — the route only needs to call it
+  // before reading the cache; the adoption logic itself is covered in snapshot-warmup.test.mjs.
+  ctx.adoptEventImageIfFresher = async (sn) => {
+    state.snapshotCache.set(sn, { jpeg: Buffer.from("fresh-detection-image"), capturedAt: 2000 });
+    return true;
+  };
+
+  const { status, body } = await get(createHttpHandler(ctx), "CAM1");
+  assert.equal(status, 200);
+  assert.deepEqual(body(), Buffer.from("fresh-detection-image"));
+});
+
+test("?force=true does not run the per-request piggyback check — force means a genuine live pull", async () => {
+  const { ctx, state } = buildCtx({
+    snapshotLive: async () => ({ jpeg: Buffer.from("fresh-live") }),
+    overrides: { SNAPSHOT_WARM_INTERVAL_MIN: "30" },
+  });
+  state.snapshotCache.set("CAM1", { jpeg: Buffer.from("stale"), capturedAt: 1000 });
+  let called = false;
+  ctx.adoptEventImageIfFresher = async () => {
+    called = true;
+  };
+
+  await get(createHttpHandler(ctx), "CAM1", "?force=true");
+  assert.equal(called, false);
+});
+
+test("without SNAPSHOT_WARM_INTERVAL_MIN configured, the per-request piggyback check never runs", async () => {
+  const { ctx, state } = buildCtx(); // no SNAPSHOT_WARM_INTERVAL_MIN — feature not opted into
+  state.snapshotCache.set("CAM1", { jpeg: Buffer.from("cached"), capturedAt: 1000 });
+  let called = false;
+  ctx.adoptEventImageIfFresher = async () => {
+    called = true;
+  };
+
+  await get(createHttpHandler(ctx), "CAM1");
+  assert.equal(called, false, "not opting into the sweep feature must not change this route's behaviour");
+});
+
 test("the default (live) path 404s (not 502) when live, stored, AND the last-event file are all unavailable", async () => {
   const { ctx } = buildCtx({
     snapshotLive: async () => {

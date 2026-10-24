@@ -187,6 +187,13 @@ export function createHttpHandler(ctx) {
       // Warmed by snapshot-warmup.mjs's own schedule (when SNAPSHOT_WARM_INTERVAL_MIN is set) — serve it
       // instantly instead of paying for a live P2P pull on every request. Empty until that feature is
       // enabled AND has run at least once, so this never changes behaviour for anyone not opting in.
+      //
+      // A genuine detection rides the push channel for free and can land at any moment, not just on the
+      // sweep's own tick — so give it a chance to displace a stale sweep capture on THIS request too,
+      // rather than making every caller wait out the rest of the sweep interval to see it. Costs one
+      // fs.stat (no P2P), and only runs at all once the sweep feature is opted into, same as the cache
+      // itself.
+      if (!force && cfg.snapshotWarmMs) await ctx.adoptEventImageIfFresher?.(sn);
       const cached = force ? undefined : snapshotCache.get(sn);
       if (cached) {
         ctx.eventLog(`/snapshot ${sn} → 200 warm cache (${cached.jpeg.length}B)`);
